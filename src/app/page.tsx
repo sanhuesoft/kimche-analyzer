@@ -31,6 +31,7 @@ type ObservationKind = "positiva" | "negativa" | "otros";
 type QuickFilter = "all" | ObservationKind;
 
 type Observation = {
+  id: string;
   curso: string;
   numeroLista: string;
   nombreCompleto: string;
@@ -53,6 +54,7 @@ const REQUIRED_HEADERS = [
 ] as const;
 
 const PIE_COLORS = ["#10b981", "#ef4444", "#6366f1"];
+const DIACRITICS_REGEX = /[\u0300-\u036f]/g;
 
 function parseDateToSortable(value: string) {
   const clean = value.trim();
@@ -75,7 +77,7 @@ function parseDateToSortable(value: string) {
 }
 
 function normalizeType(typeValue: string): ObservationKind {
-  const value = typeValue.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const value = typeValue.toLowerCase().normalize("NFD").replace(DIACRITICS_REGEX, "");
   if (value.includes("anotacion positiva")) return "positiva";
   if (value.includes("anotacion negativa")) return "negativa";
   return "otros";
@@ -123,7 +125,8 @@ export default function Home() {
     return result;
   }, [observations]);
 
-  const convivenciaRatio = total > 0 ? Math.round((summary.positivas / total) * 100) : 0;
+  const positiveObservationsPercentage =
+    total > 0 ? Math.round((summary.positivas / total) * 100) : 0;
 
   const pieData = useMemo(
     () => [
@@ -202,14 +205,15 @@ export default function Home() {
         }
 
         const parsed = data
-          .map((row) => {
+          .map((row, index) => {
             const nombreCompleto = buildStudentName(row);
             const fechaTexto = row["Fecha"]?.trim() ?? "";
             const fechaOrdenable = parseDateToSortable(fechaTexto);
 
             return {
+              id: `${fechaTexto}-${nombreCompleto}-${row["Tipo de observación"]?.trim() ?? ""}-${index}`,
               curso: row["Curso"]?.trim() ?? "",
-              numeroLista: row["No. Lista"]?.toString().trim() ?? "",
+              numeroLista: row["No. Lista"]?.trim() ?? "",
               nombreCompleto,
               fechaTexto,
               fechaOrdenable,
@@ -333,7 +337,9 @@ export default function Home() {
               <p className="text-sm text-indigo-700">Ratio de convivencia</p>
               <Star className="h-5 w-5 text-indigo-600" />
             </div>
-            <p className="mt-3 text-3xl font-semibold text-indigo-700">{convivenciaRatio}%</p>
+            <p className="mt-3 text-3xl font-semibold text-indigo-700">
+              {positiveObservationsPercentage}%
+            </p>
           </article>
         </section>
 
@@ -443,8 +449,8 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.map((row, index) => (
-                  <tr key={`${row.nombreCompleto}-${row.fechaTexto}-${index}`} className="border-b border-slate-100">
+                {filteredRows.map((row) => (
+                  <tr key={row.id} className="border-b border-slate-100">
                     <td className="px-2 py-3 text-slate-600">{row.fechaTexto || "-"}</td>
                     <td className="px-2 py-3 font-medium">{row.nombreCompleto}</td>
                     <td className="px-2 py-3">
