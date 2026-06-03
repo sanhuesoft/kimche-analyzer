@@ -46,6 +46,19 @@ type Observation = {
   asignaturaOrCategorizacion: string;
 };
 
+type PendienteItem = {
+  id: string;
+  tipo: "firma" | "leccionario";
+  docente: string;
+  curso: string;
+  asignatura: string;
+  fecha: string;
+  hora: string;
+  estadoFirma?: string;
+  estadoRegistro?: string;
+  checked: boolean;
+};
+
 const REQUIRED_HEADERS = [
   "Curso",
   "No. Lista",
@@ -153,6 +166,11 @@ export default function Home() {
   const [timeResolution, setTimeResolution] = useState<"daily" | "monthly">("daily");
   const [visibleCount, setVisibleCount] = useState(25);
   const observerRef = useRef<HTMLDivElement | null>(null);
+
+  const [appMode, setAppMode] = useState<"observations" | "pendientes">("observations");
+  const [pendientes, setPendientes] = useState<PendienteItem[]>([]);
+  const [pendientesSearch, setPendientesSearch] = useState("");
+  const [pendientesFilter, setPendientesFilter] = useState<"all" | "firma" | "leccionario">("all");
 
   useEffect(() => {
     setVisibleCount(25);
@@ -346,6 +364,40 @@ export default function Home() {
     return () => observer.disconnect();
   }, [filteredRows, visibleCount]);
 
+  const sortedPendientes = useMemo(() => {
+    const term = pendientesSearch.toLowerCase().trim();
+    const filtered = pendientes.filter((item) => {
+      const matchesType = pendientesFilter === "all" || item.tipo === pendientesFilter;
+      const matchesSearch =
+        !term ||
+        item.docente.toLowerCase().includes(term) ||
+        item.curso.toLowerCase().includes(term) ||
+        item.asignatura.toLowerCase().includes(term);
+      return matchesType && matchesSearch;
+    });
+
+    return [...filtered].sort((a, b) => {
+      if (a.checked === b.checked) {
+        return a.fecha.localeCompare(b.fecha) || a.hora.localeCompare(b.hora);
+      }
+      return a.checked ? 1 : -1;
+    });
+  }, [pendientes, pendientesSearch, pendientesFilter]);
+
+  const pendientesSummary = useMemo(() => {
+    const totalItems = pendientes.length;
+    const completados = pendientes.filter((p) => p.checked).length;
+    const firmasPendientes = pendientes.filter((p) => p.tipo === "firma" && !p.checked).length;
+    const leccionariosPendientes = pendientes.filter((p) => p.tipo === "leccionario" && !p.checked).length;
+    return { totalItems, completados, firmasPendientes, leccionariosPendientes };
+  }, [pendientes]);
+
+  const togglePendiente = (id: string) => {
+    setPendientes((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, checked: !item.checked } : item))
+    );
+  };
+
   const parseAndLoadCsv = (file: File) => {
     Papa.parse<Record<string, string>>(file, {
       header: true,
@@ -388,82 +440,195 @@ export default function Home() {
     });
   };
 
-  const parseAndLoadExcel = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: "array" });
-        const firstSheetName = workbook.SheetNames[0];
-        if (!firstSheetName) {
-          setErrorMessage("El archivo Excel no contiene hojas de trabajo.");
-          return;
-        }
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
+  const processObservationsWorkbook = (workbook: XLSX.WorkBook) => {
+    try {
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        setErrorMessage("El archivo Excel no contiene hojas de trabajo.");
+        return;
+      }
+      const worksheet = workbook.Sheets[firstSheetName];
+      const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
+        defval: "",
+        raw: false,
+      });
+
+      if (jsonData.length === 0) {
+        setErrorMessage("El archivo Excel está vacío.");
+        return;
+      }
+
+      const headers = Object.keys(jsonData[0]);
+      const missingHeaders = REQUIRED_HEADERS.filter((header) => !headers.includes(header));
+      if (missingHeaders.length > 0) {
+        setObservations([]);
+        setErrorMessage(`Faltan columnas obligatorias: ${missingHeaders.join(", ")}`);
+        return;
+      }
+
+      const parsed = jsonData
+        .map((row, index) => {
+          const normalizedRow: Record<string, string> = {};
+          for (const key of Object.keys(row)) {
+            normalizedRow[key] = String(row[key]);
+          }
+
+          const nombreCompleto = buildStudentName(normalizedRow);
+          const fechaTexto = normalizedRow["Fecha"]?.trim() ?? "";
+          const fechaOrdenable = parseDateToSortable(fechaTexto);
+
+          return {
+            id: `${fechaTexto}-${nombreCompleto}-${normalizedRow["Tipo de observación"]?.trim() ?? ""}-${index}`,
+            curso: normalizedRow["Curso"]?.trim() ?? "",
+            numeroLista: normalizedRow["No. Lista"]?.trim() ?? "",
+            nombreCompleto,
+            fechaTexto,
+            fechaOrdenable,
+            tipoOriginal: normalizedRow["Tipo de observación"]?.trim() ?? "",
+            tipo: normalizeType(normalizedRow["Tipo de observación"]?.trim() ?? ""),
+            descripcion: normalizedRow["Descripción"]?.trim() ?? "",
+            asignaturaOrCategorizacion: normalizedRow["Asignatura"]?.trim() || normalizedRow["Categorización"]?.trim() || "",
+          } satisfies Observation;
+        })
+        .filter((item) => item.nombreCompleto && item.descripcion && item.tipoOriginal);
+
+      setObservations(parsed);
+    } catch (error: any) {
+      setObservations([]);
+      setErrorMessage(`No fue posible leer el archivo Excel: ${error.message}`);
+    }
+  };
+
+  const processPendientesWorkbook = (workbook: XLSX.WorkBook) => {
+    try {
+      const items: PendienteItem[] = [];
+
+      const sheet1Name = workbook.SheetNames.find((name) =>
+        name.toLowerCase().includes("firma")
+      ) || workbook.SheetNames[0];
+
+      if (sheet1Name) {
+        const sheet1 = workbook.Sheets[sheet1Name];
+        const data1 = XLSX.utils.sheet_to_json<Record<string, any>>(sheet1, {
           defval: "",
           raw: false,
         });
+        data1.forEach((row, index) => {
+          const docente = row["Docente titular"]?.trim() ?? row["Docente"]?.trim() ?? "";
+          const curso = row["Curso"]?.trim() ?? "";
+          const asignatura = row["Asignatura"]?.trim() ?? "";
+          const fecha = row["Fecha"]?.trim() ?? "";
+          const hora = row["Hora de clase"]?.trim() ?? row["Hora"]?.trim() ?? "";
 
-        if (jsonData.length === 0) {
-          setErrorMessage("El archivo Excel está vacío.");
-          return;
-        }
-
-        const headers = Object.keys(jsonData[0]);
-        const missingHeaders = REQUIRED_HEADERS.filter((header) => !headers.includes(header));
-        if (missingHeaders.length > 0) {
-          setObservations([]);
-          setErrorMessage(`Faltan columnas obligatorias: ${missingHeaders.join(", ")}`);
-          return;
-        }
-
-        const parsed = jsonData
-          .map((row, index) => {
-            const normalizedRow: Record<string, string> = {};
-            for (const key of Object.keys(row)) {
-              normalizedRow[key] = String(row[key]);
-            }
-
-            const nombreCompleto = buildStudentName(normalizedRow);
-            const fechaTexto = normalizedRow["Fecha"]?.trim() ?? "";
-            const fechaOrdenable = parseDateToSortable(fechaTexto);
-
-            return {
-              id: `${fechaTexto}-${nombreCompleto}-${normalizedRow["Tipo de observación"]?.trim() ?? ""}-${index}`,
-              curso: normalizedRow["Curso"]?.trim() ?? "",
-              numeroLista: normalizedRow["No. Lista"]?.trim() ?? "",
-              nombreCompleto,
-              fechaTexto,
-              fechaOrdenable,
-              tipoOriginal: normalizedRow["Tipo de observación"]?.trim() ?? "",
-              tipo: normalizeType(normalizedRow["Tipo de observación"]?.trim() ?? ""),
-              descripcion: normalizedRow["Descripción"]?.trim() ?? "",
-              asignaturaOrCategorizacion: normalizedRow["Asignatura"]?.trim() || normalizedRow["Categorización"]?.trim() || "",
-            } satisfies Observation;
-          })
-          .filter((item) => item.nombreCompleto && item.descripcion && item.tipoOriginal);
-
-        setObservations(parsed);
-      } catch (error: any) {
-        setObservations([]);
-        setErrorMessage(`No fue posible leer el archivo Excel: ${error.message}`);
+          if (docente || curso || asignatura) {
+            items.push({
+              id: `firma-${fecha}-${hora}-${asignatura}-${index}`,
+              tipo: "firma",
+              docente,
+              curso,
+              asignatura,
+              fecha,
+              hora,
+              estadoFirma: row["Estado de la firma"]?.trim() ?? "",
+              estadoRegistro: row["Estado del registro"]?.trim() ?? "",
+              checked: false,
+            });
+          }
+        });
       }
-    };
-    reader.onerror = () => {
-      setObservations([]);
-      setErrorMessage("Error al leer el archivo.");
-    };
-    reader.readAsArrayBuffer(file);
+
+      const sheet2Name = workbook.SheetNames.find((name) =>
+        name.toLowerCase().includes("leccionario") || name.toLowerCase().includes("registro")
+      ) || workbook.SheetNames[1];
+
+      if (sheet2Name) {
+        const sheet2 = workbook.Sheets[sheet2Name];
+        const data2 = XLSX.utils.sheet_to_json<Record<string, any>>(sheet2, {
+          defval: "",
+          raw: false,
+        });
+        data2.forEach((row, index) => {
+          const docente = row["Docente titular"]?.trim() ?? row["Docente"]?.trim() ?? "";
+          const curso = row["Curso"]?.trim() ?? "";
+          const asignatura = row["Asignatura"]?.trim() ?? "";
+          const fecha = row["Fecha"]?.trim() ?? "";
+          const hora = row["Hora de clase"]?.trim() ?? row["Hora"]?.trim() ?? "";
+
+          if (docente || curso || asignatura) {
+            items.push({
+              id: `leccionario-${fecha}-${hora}-${asignatura}-${index}`,
+              tipo: "leccionario",
+              docente,
+              curso,
+              asignatura,
+              fecha,
+              hora,
+              estadoRegistro: row["Estado del registro"]?.trim() ?? "",
+              checked: false,
+            });
+          }
+        });
+      }
+
+      if (items.length === 0) {
+        setErrorMessage("No se encontraron registros pendientes en el archivo.");
+        return;
+      }
+
+      setPendientes(items);
+    } catch (error: any) {
+      setErrorMessage(`Error al leer el archivo de pendientes: ${error.message}`);
+    }
   };
 
   const handleFile = (file: File) => {
     setErrorMessage("");
     const fileName = file.name.toLowerCase();
+
     if (fileName.endsWith(".csv")) {
+      setAppMode("observations");
       parseAndLoadCsv(file);
     } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-      parseAndLoadExcel(file);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = new Uint8Array(e.target?.result as ArrayBuffer);
+          const workbook = XLSX.read(data, { type: "array" });
+
+          const firstSheetName = workbook.SheetNames[0];
+          let isPendientes = false;
+
+          const hasPendientesSheetNames = workbook.SheetNames.some(
+            (name) =>
+              name.toLowerCase().includes("firma") ||
+              name.toLowerCase().includes("leccionario") ||
+              name.toLowerCase().includes("registro")
+          );
+
+          if (hasPendientesSheetNames) {
+            isPendientes = true;
+          } else if (firstSheetName) {
+            const worksheet = workbook.Sheets[firstSheetName];
+            const json = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { header: 1 });
+            const headers = (json[0] || []).map((h: any) => String(h).trim().toLowerCase());
+            isPendientes = headers.includes("docente titular") || headers.includes("docente") || headers.includes("estado de la firma") || headers.includes("hora de clase");
+          }
+
+          if (isPendientes) {
+            setAppMode("pendientes");
+            processPendientesWorkbook(workbook);
+          } else {
+            setAppMode("observations");
+            processObservationsWorkbook(workbook);
+          }
+        } catch (error: any) {
+          setErrorMessage(`No fue posible leer el archivo Excel: ${error.message}`);
+        }
+      };
+      reader.onerror = () => {
+        setErrorMessage("Error al leer el archivo.");
+      };
+      reader.readAsArrayBuffer(file);
     } else {
       setErrorMessage("Por favor, sube un archivo CSV o Excel (.xlsx, .xls).");
     }
@@ -484,18 +649,18 @@ export default function Home() {
     handleFile(file);
   };
 
-  if (observations.length === 0) {
+  if (observations.length === 0 && pendientes.length === 0) {
     return (
-      <main className="min-h-screen bg-slate-100 px-4 py-10 text-slate-900">
-        <section className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+      <main className="min-h-screen bg-slate-100 px-4 py-10 text-slate-900 flex items-center justify-center">
+        <section className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
           <div className="mb-8 flex items-center gap-3">
             <div className="rounded-xl bg-indigo-100 p-2 text-indigo-600">
               <Users className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-2xl font-semibold">Kimche Analyzer</h1>
+              <h1 className="text-2xl font-semibold">Kimche Analyzer & Control</h1>
               <p className="text-sm text-slate-500">
-                Carga un CSV o Excel de observaciones escolares para visualizar métricas y tendencias.
+                Sube tu CSV o Excel de observaciones, o el Excel de pendientes (firmas y leccionario). Se detectará automáticamente.
               </p>
             </div>
           </div>
@@ -516,8 +681,8 @@ export default function Home() {
               <Upload className="h-6 w-6 text-indigo-500" />
             </div>
             <div>
-              <p className="font-medium">Arrastra y suelta tu CSV o Excel aquí</p>
-              <p className="text-sm text-slate-500">o haz clic para seleccionarlo desde tu equipo</p>
+              <p className="font-medium">Arrastra y suelta tu archivo aquí</p>
+              <p className="text-sm text-slate-500">Acepta CSV de observaciones y Excel (.xlsx, .xls) de pendientes</p>
             </div>
             <input
               type="file"
@@ -538,11 +703,170 @@ export default function Home() {
     );
   }
 
+  if (appMode === "pendientes" && pendientes.length > 0) {
+    return (
+      <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900">
+        <div className="mx-auto flex max-w-7xl flex-col gap-6">
+          <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold">Control de Firmas y Leccionarios Pendientes</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                Visualiza y gestiona las actividades pendientes en tu libro de clases digital. Todo de forma local y temporal.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setObservations([]);
+                setPendientes([]);
+                setErrorMessage("");
+              }}
+              className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
+            >
+              Subir otro archivo
+            </button>
+          </header>
+
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm text-slate-500">Total actividades</p>
+              <p className="mt-3 text-3xl font-semibold">{pendientesSummary.totalItems}</p>
+            </article>
+            <article className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-indigo-700">Firmas pendientes</p>
+                <Users className="h-5 w-5 text-indigo-600" />
+              </div>
+              <p className="mt-3 text-3xl font-semibold text-indigo-700">{pendientesSummary.firmasPendientes}</p>
+            </article>
+            <article className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-amber-700">Leccionarios pendientes</p>
+                <AlertCircle className="h-5 w-5 text-amber-600" />
+              </div>
+              <p className="mt-3 text-3xl font-semibold text-amber-700">{pendientesSummary.leccionariosPendientes}</p>
+            </article>
+            <article className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-emerald-700">Tareas completadas</p>
+                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+              </div>
+              <p className="mt-3 text-3xl font-semibold text-emerald-700">{pendientesSummary.completados}</p>
+            </article>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="relative w-full lg:max-w-sm">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={pendientesSearch}
+                  onChange={(event) => setPendientesSearch(event.target.value)}
+                  placeholder="Buscar por docente, asignatura o curso..."
+                  className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none ring-indigo-500 transition focus:ring"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 text-sm">
+                <Filter className="h-4 w-4 text-slate-500" />
+                {([
+                  { value: "all", label: "Ver todo" },
+                  { value: "firma", label: "Solo Firmas" },
+                  { value: "leccionario", label: "Solo Leccionarios" },
+                ] as const).map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setPendientesFilter(option.value)}
+                    className={`rounded-xl px-3 py-2 transition ${pendientesFilter === option.value
+                      ? "bg-indigo-600 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                      }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {sortedPendientes.length > 0 ? (
+                sortedPendientes.map((item) => (
+                  <div
+                    key={item.id}
+                    onClick={() => togglePendiente(item.id)}
+                    className={`flex items-start gap-4 rounded-xl border p-4 cursor-pointer transition select-none ${
+                      item.checked
+                        ? "bg-slate-50 border-slate-200 text-slate-400 opacity-60 line-through"
+                        : "bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50/30"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={item.checked}
+                      onChange={() => {}}
+                      className="mt-1 h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+
+                    <div className="flex-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                              item.tipo === "firma"
+                                ? "bg-indigo-100 text-indigo-700"
+                                : "bg-amber-100 text-amber-700"
+                            }`}
+                          >
+                            {item.tipo === "firma" ? "Firma" : "Leccionario"}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {item.fecha} {item.hora && `| Hora: ${item.hora}`}
+                          </span>
+                        </div>
+                        <h4 className="font-semibold text-slate-800 mt-1">
+                          {item.docente}
+                        </h4>
+                      </div>
+
+                      <div className="text-sm text-slate-600 sm:text-right">
+                        <p className="font-medium text-slate-700">{item.asignatura}</p>
+                        <p className="text-xs text-slate-500">{item.curso}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-center py-12 text-slate-400 italic">
+                  No se encontraron pendientes.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold">Dashboard de Convivencia Escolar</h1>
+        <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold">Dashboard de Convivencia Escolar</h1>
+            <p className="mt-1 text-sm text-slate-500">
+              Visualización y métricas de observaciones de convivencia escolar cargadas.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setObservations([]);
+              setPendientes([]);
+              setErrorMessage("");
+            }}
+            className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
+          >
+            Subir otro archivo
+          </button>
         </header>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
