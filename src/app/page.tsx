@@ -57,7 +57,7 @@ const REQUIRED_HEADERS = [
   "Descripción",
 ] as const;
 
-const PIE_COLORS = ["#10b981", "#ef4444", "#6366f1"];
+const PIE_COLORS = ["#10b981", "#ef4444", "#6366f1", "#f59e0b"];
 const DIACRITICS_REGEX = /[\u0300-\u036f]/g;
 
 function parseDateToSortable(value: string) {
@@ -173,14 +173,34 @@ export default function Home() {
   const positiveObservationsPercentage =
     total > 0 ? Math.round((summary.positivas / total) * 100) : 0;
 
-  const pieData = useMemo(
-    () => [
-      { name: "Positivas", value: summary.positivas },
-      { name: "Negativas", value: summary.negativas },
-      { name: "Otros/Entrevistas", value: summary.otros },
-    ],
-    [summary],
-  );
+  const pieData = useMemo(() => {
+    let positivas = 0;
+    let negativas = 0;
+    let entrevistas = 0;
+    let otros = 0;
+
+    for (const row of observations) {
+      if (row.tipo === "positiva") {
+        positivas += 1;
+      } else if (row.tipo === "negativa") {
+        negativas += 1;
+      } else {
+        const raw = row.tipoOriginal.toLowerCase().normalize("NFD").replace(DIACRITICS_REGEX, "");
+        if (raw.includes("entrevista")) {
+          entrevistas += 1;
+        } else {
+          otros += 1;
+        }
+      }
+    }
+
+    return [
+      { name: "Positivas", value: positivas },
+      { name: "Negativas", value: negativas },
+      { name: "Entrevistas", value: entrevistas },
+      { name: "Otros", value: otros },
+    ].filter((item) => item.value > 0);
+  }, [observations]);
 
   const trendData = useMemo(() => {
     const map = new Map<string, { fecha: string; positivas: number; negativas: number }>();
@@ -523,9 +543,6 @@ export default function Home() {
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
         <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h1 className="text-2xl font-semibold">Dashboard de Convivencia Escolar</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Total de registros cargados: <span className="font-semibold text-slate-700">{total}</span>
-          </p>
         </header>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -645,22 +662,20 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => setTimeResolution("daily")}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                      timeResolution === "daily"
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${timeResolution === "daily"
                         ? "bg-white text-slate-800 shadow-sm"
                         : "text-slate-500 hover:text-slate-850"
-                    }`}
+                      }`}
                   >
                     Diario (Líneas)
                   </button>
                   <button
                     type="button"
                     onClick={() => setTimeResolution("monthly")}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
-                      timeResolution === "monthly"
+                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${timeResolution === "monthly"
                         ? "bg-white text-slate-800 shadow-sm"
                         : "text-slate-500 hover:text-slate-850"
-                    }`}
+                      }`}
                   >
                     Mensual (Líneas)
                   </button>
