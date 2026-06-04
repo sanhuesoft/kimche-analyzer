@@ -174,6 +174,7 @@ export default function Home() {
   const [selectedAsignatura, setSelectedAsignatura] = useState<string>("all");
   const [selectedCurso, setSelectedCurso] = useState<string>("all");
   const [selectedFecha, setSelectedFecha] = useState<string>("all");
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     setVisibleCount(25);
@@ -658,31 +659,37 @@ export default function Home() {
     const handleExtensionMessage = (event: MessageEvent) => {
       const message = event.data;
       if (message && message.type === "KIMCHE_EXT_FILE") {
-        try {
-          const fileName = message.name || "archivo.xlsx";
-          
-          if (message.base64) {
-            const binaryString = window.atob(message.base64);
-            const len = binaryString.length;
-            const bytes = new Uint8Array(len);
-            for (let i = 0; i < len; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
+        setIsLoading(true);
+        // Delay slightly so the loading animation renders beautifully before processing
+        setTimeout(() => {
+          try {
+            const fileName = message.name || "archivo.xlsx";
+
+            if (message.base64) {
+              const binaryString = window.atob(message.base64);
+              const len = binaryString.length;
+              const bytes = new Uint8Array(len);
+              for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+              }
+
+              const file = new File([bytes], fileName, {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              });
+              handleFile(file);
+            } else if (message.data instanceof Uint8Array || message.data instanceof ArrayBuffer) {
+              const bytes = message.data instanceof Uint8Array ? message.data : new Uint8Array(message.data);
+              const file = new File([bytes], fileName, {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              });
+              handleFile(file);
             }
-            
-            const file = new File([bytes], fileName, {
-              type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            });
-            handleFile(file);
-          } else if (message.data instanceof Uint8Array || message.data instanceof ArrayBuffer) {
-            const bytes = message.data instanceof Uint8Array ? message.data : new Uint8Array(message.data);
-            const file = new File([bytes], fileName, {
-              type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            });
-            handleFile(file);
+          } catch (err: any) {
+            setErrorMessage(`Error al procesar archivo de la extensión: ${err.message}`);
+          } finally {
+            setIsLoading(false);
           }
-        } catch (err: any) {
-          setErrorMessage(`Error al procesar archivo de la extensión: ${err.message}`);
-        }
+        }, 1200);
       }
     };
 
@@ -710,6 +717,21 @@ export default function Home() {
   if (observations.length === 0 && pendientes.length === 0) {
     return (
       <main className="min-h-screen bg-slate-100 px-4 py-10 text-slate-900 flex items-center justify-center">
+        {isLoading && (
+          <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
+            <div className="relative flex items-center justify-center h-20 w-20">
+              {/* Spinning outer gradient ring */}
+              <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-indigo-500 border-r-purple-500 animate-spin" />
+              {/* Secondary counter-spinning ring */}
+              <div className="absolute inset-1.5 rounded-full border-4 border-transparent border-b-blue-500 border-l-pink-500 animate-spin [animation-duration:1.5s]" />
+              {/* Inner glowing core */}
+              <div className="h-4 w-4 rounded-full bg-indigo-500 animate-ping" />
+            </div>
+            <p className="mt-6 text-[11px] font-extrabold uppercase tracking-widest text-slate-200 animate-pulse">
+              Procesando planilla desde Kimche Plus...
+            </p>
+          </div>
+        )}
         <section className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
           <div className="mb-8 flex items-center gap-3">
             <div className="rounded-xl bg-indigo-100 p-2 text-indigo-600">
@@ -718,7 +740,7 @@ export default function Home() {
             <div>
               <h1 className="text-2xl font-semibold">Kimche Analyzer</h1>
               <p className="text-sm text-slate-500">
-                Carga tu Registro de firmas pendientes o el Registro de observaciones de tu curso y obtén estadísticas mejor organizadas. Se detectará automáticamente el tipo de registro que cargues. El análisis se realiza de manera local, por lo que no se comparte ningún dato de tus planillas con nadie.
+                Carga tu Registro de firmas pendientes o el Registro de observaciones de tu curso (detección automática) y obtén estadísticas mejor organizadas. El análisis se realiza de manera local, por lo que no se comparte ningún dato de tus planillas con nadie. También puedes descargar e instalar la extensión para Chrome <a href="/kimche-plus.crx" className="text-indigo-650 hover:text-indigo-800 font-semibold underline">Kimche Plus</a> para cargar las planillas directamente.
               </p>
             </div>
           </div>
@@ -764,6 +786,21 @@ export default function Home() {
   if (appMode === "pendientes" && pendientes.length > 0) {
     return (
       <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900">
+        {isLoading && (
+          <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
+            <div className="relative flex items-center justify-center h-20 w-20">
+              {/* Spinning outer gradient ring */}
+              <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-indigo-500 border-r-purple-500 animate-spin" />
+              {/* Secondary counter-spinning ring */}
+              <div className="absolute inset-1.5 rounded-full border-4 border-transparent border-b-blue-500 border-l-pink-500 animate-spin [animation-duration:1.5s]" />
+              {/* Inner glowing core */}
+              <div className="h-4 w-4 rounded-full bg-indigo-500 animate-ping" />
+            </div>
+            <p className="mt-6 text-[11px] font-extrabold uppercase tracking-widest text-slate-200 animate-pulse">
+              Procesando planilla desde Kimche Plus...
+            </p>
+          </div>
+        )}
         <div className="mx-auto flex max-w-7xl flex-col gap-6">
           <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
@@ -1018,6 +1055,21 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900">
+      {isLoading && (
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
+          <div className="relative flex items-center justify-center h-20 w-20">
+            {/* Spinning outer gradient ring */}
+            <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-indigo-500 border-r-purple-500 animate-spin" />
+            {/* Secondary counter-spinning ring */}
+            <div className="absolute inset-1.5 rounded-full border-4 border-transparent border-b-blue-500 border-l-pink-500 animate-spin [animation-duration:1.5s]" />
+            {/* Inner glowing core */}
+            <div className="h-4 w-4 rounded-full bg-indigo-500 animate-ping" />
+          </div>
+          <p className="mt-6 text-[11px] font-extrabold uppercase tracking-widest text-slate-200 animate-pulse">
+            Procesando planilla desde Kimche Plus...
+          </p>
+        </div>
+      )}
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
         <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
