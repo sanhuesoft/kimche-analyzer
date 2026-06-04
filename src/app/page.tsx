@@ -171,6 +171,9 @@ export default function Home() {
   const [pendientes, setPendientes] = useState<PendienteItem[]>([]);
   const [pendientesSearch, setPendientesSearch] = useState("");
   const [pendientesFilter, setPendientesFilter] = useState<"all" | "firma" | "leccionario">("all");
+  const [selectedAsignatura, setSelectedAsignatura] = useState<string>("all");
+  const [selectedCurso, setSelectedCurso] = useState<string>("all");
+  const [selectedFecha, setSelectedFecha] = useState<string>("all");
 
   useEffect(() => {
     setVisibleCount(25);
@@ -364,16 +367,33 @@ export default function Home() {
     return () => observer.disconnect();
   }, [filteredRows, visibleCount]);
 
+  const uniqueAsignaturas = useMemo(() => {
+    return Array.from(new Set(pendientes.map((p) => p.asignatura).filter(Boolean))).sort();
+  }, [pendientes]);
+
+  const uniqueCursos = useMemo(() => {
+    return Array.from(new Set(pendientes.map((p) => p.curso).filter(Boolean))).sort();
+  }, [pendientes]);
+
+  const uniqueFechas = useMemo(() => {
+    return Array.from(new Set(pendientes.map((p) => p.fecha).filter(Boolean))).sort();
+  }, [pendientes]);
+
   const sortedPendientes = useMemo(() => {
     const term = pendientesSearch.toLowerCase().trim();
     const filtered = pendientes.filter((item) => {
       const matchesType = pendientesFilter === "all" || item.tipo === pendientesFilter;
+      const matchesAsignatura = selectedAsignatura === "all" || item.asignatura === selectedAsignatura;
+      const matchesCurso = selectedCurso === "all" || item.curso === selectedCurso;
+      const matchesFecha = selectedFecha === "all" || item.fecha === selectedFecha;
       const matchesSearch =
         !term ||
         item.docente.toLowerCase().includes(term) ||
         item.curso.toLowerCase().includes(term) ||
-        item.asignatura.toLowerCase().includes(term);
-      return matchesType && matchesSearch;
+        item.asignatura.toLowerCase().includes(term) ||
+        item.fecha.toLowerCase().includes(term) ||
+        item.hora.toLowerCase().includes(term);
+      return matchesType && matchesAsignatura && matchesCurso && matchesFecha && matchesSearch;
     });
 
     return [...filtered].sort((a, b) => {
@@ -382,7 +402,7 @@ export default function Home() {
       }
       return a.checked ? 1 : -1;
     });
-  }, [pendientes, pendientesSearch, pendientesFilter]);
+  }, [pendientes, pendientesSearch, pendientesFilter, selectedAsignatura, selectedCurso, selectedFecha]);
 
   const pendientesSummary = useMemo(() => {
     const totalItems = pendientes.length;
@@ -658,9 +678,9 @@ export default function Home() {
               <Users className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-2xl font-semibold">Kimche Analyzer & Control</h1>
+              <h1 className="text-2xl font-semibold">Kimche Analyzer</h1>
               <p className="text-sm text-slate-500">
-                Sube tu CSV o Excel de observaciones, o el Excel de pendientes (firmas y leccionario). Se detectará automáticamente.
+                Carga tu Registro de firmas pendientes o el Registro de observaciones de tu curso y obtén estadísticas mejor organizadas. Se detectará automáticamente el tipo de registro que cargues. El análisis se realiza de manera local, por lo que no se comparte ningún dato de tus planillas con nadie.
               </p>
             </div>
           </div>
@@ -719,6 +739,11 @@ export default function Home() {
                 setObservations([]);
                 setPendientes([]);
                 setErrorMessage("");
+                setSelectedAsignatura("all");
+                setSelectedCurso("all");
+                setSelectedFecha("all");
+                setPendientesSearch("");
+                setPendientesFilter("all");
               }}
               className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
             >
@@ -726,117 +751,223 @@ export default function Home() {
             </button>
           </header>
 
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-sm text-slate-500">Total actividades</p>
-              <p className="mt-3 text-3xl font-semibold">{pendientesSummary.totalItems}</p>
-            </article>
-            <article className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-indigo-700">Firmas pendientes</p>
-                <Users className="h-5 w-5 text-indigo-600" />
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {/* Firmas Pendientes */}
+            <article className="relative overflow-hidden rounded-xl bg-blue-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                    <Users className="h-4 w-4" />
+                  </div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">Firmas pendientes</p>
+                </div>
+                <p className="text-2xl font-extrabold">{pendientesSummary.firmasPendientes}</p>
               </div>
-              <p className="mt-3 text-3xl font-semibold text-indigo-700">{pendientesSummary.firmasPendientes}</p>
             </article>
-            <article className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-amber-700">Leccionarios pendientes</p>
-                <AlertCircle className="h-5 w-5 text-amber-600" />
+
+            {/* Leccionarios Pendientes */}
+            <article className="relative overflow-hidden rounded-xl bg-purple-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                    <AlertCircle className="h-4 w-4" />
+                  </div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-purple-100">Leccionarios pendientes</p>
+                </div>
+                <p className="text-2xl font-extrabold">{pendientesSummary.leccionariosPendientes}</p>
               </div>
-              <p className="mt-3 text-3xl font-semibold text-amber-700">{pendientesSummary.leccionariosPendientes}</p>
             </article>
-            <article className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-emerald-700">Tareas completadas</p>
-                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+
+            {/* Tareas Completadas */}
+            <article className="relative overflow-hidden rounded-xl bg-emerald-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                    <CheckCircle2 className="h-4 w-4" />
+                  </div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Tareas completadas</p>
+                </div>
+                <p className="text-2xl font-extrabold">{pendientesSummary.completados}</p>
               </div>
-              <p className="mt-3 text-3xl font-semibold text-emerald-700">{pendientesSummary.completados}</p>
             </article>
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="relative w-full lg:max-w-sm">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  value={pendientesSearch}
-                  onChange={(event) => setPendientesSearch(event.target.value)}
-                  placeholder="Buscar por docente, asignatura o curso..."
-                  className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none ring-indigo-500 transition focus:ring"
-                />
+            <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-indigo-500" />
+                  Panel de Filtros Rápidos
+                </h3>
+                {(selectedAsignatura !== "all" || selectedCurso !== "all" || selectedFecha !== "all" || pendientesSearch !== "" || pendientesFilter !== "all") && (
+                  <button
+                    onClick={() => {
+                      setSelectedAsignatura("all");
+                      setSelectedCurso("all");
+                      setSelectedFecha("all");
+                      setPendientesSearch("");
+                      setPendientesFilter("all");
+                    }}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
+                  >
+                    Restablecer todos los filtros
+                  </button>
+                )}
               </div>
 
-              <div className="flex items-center gap-2 text-sm">
-                <Filter className="h-4 w-4 text-slate-500" />
-                {([
-                  { value: "all", label: "Ver todo" },
-                  { value: "firma", label: "Solo Firmas" },
-                  { value: "leccionario", label: "Solo Leccionarios" },
-                ] as const).map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => setPendientesFilter(option.value)}
-                    className={`rounded-xl px-3 py-2 transition ${pendientesFilter === option.value
-                      ? "bg-indigo-600 text-white"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                      }`}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                {/* 1. Búsqueda de texto */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Buscar
+                  </label>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={pendientesSearch}
+                      onChange={(event) => setPendientesSearch(event.target.value)}
+                      placeholder="Docente o palabra..."
+                      className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs outline-none ring-indigo-500 transition focus:ring"
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Filtro de Tipo */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Tipo
+                  </label>
+                  <select
+                    value={pendientesFilter}
+                    onChange={(e) => setPendientesFilter(e.target.value as any)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
                   >
-                    {option.label}
-                  </button>
-                ))}
+                    <option value="all">Todos</option>
+                    <option value="firma">Solo Firmas</option>
+                    <option value="leccionario">Solo Leccionarios</option>
+                  </select>
+                </div>
+
+                {/* 3. Filtro de Asignatura */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Asignatura
+                  </label>
+                  <select
+                    value={selectedAsignatura}
+                    onChange={(e) => setSelectedAsignatura(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
+                  >
+                    <option value="all">Todas</option>
+                    {uniqueAsignaturas.map((asig) => (
+                      <option key={asig} value={asig}>
+                        {asig}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 4. Filtro de Curso */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Curso
+                  </label>
+                  <select
+                    value={selectedCurso}
+                    onChange={(e) => setSelectedCurso(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
+                  >
+                    <option value="all">Todos</option>
+                    {uniqueCursos.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 5. Filtro de Fecha */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Fecha
+                  </label>
+                  <select
+                    value={selectedFecha}
+                    onChange={(e) => setSelectedFecha(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
+                  >
+                    <option value="all">Todas</option>
+                    {uniqueFechas.map((f) => (
+                      <option key={f} value={f}>
+                        {f}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {sortedPendientes.length > 0 ? (
                 sortedPendientes.map((item) => (
                   <div
                     key={item.id}
                     onClick={() => togglePendiente(item.id)}
-                    className={`flex items-start gap-4 rounded-xl border p-4 cursor-pointer transition select-none ${
-                      item.checked
-                        ? "bg-slate-50 border-slate-200 text-slate-400 opacity-60 line-through"
-                        : "bg-white border-slate-200 hover:border-indigo-300 hover:bg-slate-50/30"
-                    }`}
+                    className={`flex items-start gap-3 rounded-xl border p-4 cursor-pointer transition select-none ${item.checked
+                      ? "bg-slate-50 border-slate-200 text-slate-400 opacity-60 line-through"
+                      : "bg-white border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/10 shadow-sm hover:shadow"
+                      }`}
                   >
-                    <input
-                      type="checkbox"
-                      checked={item.checked}
-                      onChange={() => {}}
-                      className="mt-1 h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                    />
+                    <div className="flex items-start pt-1">
+                      <input
+                        type="checkbox"
+                        checked={item.checked}
+                        onChange={() => { }}
+                        className="h-5 w-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      />
+                    </div>
 
-                    <div className="flex-1 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <div className="flex-1 flex flex-col justify-between min-h-[90px] gap-2">
                       <div>
-                        <div className="flex items-center gap-2 flex-wrap">
+                        <div className="mb-1.5">
                           <span
-                            className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                              item.tipo === "firma"
-                                ? "bg-indigo-100 text-indigo-700"
-                                : "bg-amber-100 text-amber-700"
-                            }`}
+                            className={`inline-block rounded-md px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white ${item.tipo === "firma"
+                              ? "bg-blue-600"
+                              : "bg-purple-600"
+                              }`}
                           >
                             {item.tipo === "firma" ? "Firma" : "Leccionario"}
                           </span>
-                          <span className="text-xs text-slate-500">
-                            {item.fecha} {item.hora && `| Hora: ${item.hora}`}
-                          </span>
                         </div>
-                        <h4 className="font-semibold text-slate-800 mt-1">
-                          {item.docente}
+                        <h4 className="font-bold text-base text-slate-800 leading-tight">
+                          {item.asignatura}
                         </h4>
                       </div>
 
-                      <div className="text-sm text-slate-600 sm:text-right">
-                        <p className="font-medium text-slate-700">{item.asignatura}</p>
-                        <p className="text-xs text-slate-500">{item.curso}</p>
+                      {/* Unified 3-column metadata block */}
+                      <div className={`grid grid-cols-3 text-center text-[11px] bg-slate-50 border border-slate-200/60 rounded-lg divide-x divide-slate-200 overflow-hidden mt-1.5 shadow-sm ${item.checked ? "opacity-75" : ""}`}>
+                        <div className="py-1.5 px-1 font-semibold text-slate-700 truncate" title={item.curso}>
+                          {item.curso}
+                        </div>
+                        <div className="py-1.5 px-1 font-medium text-slate-600 truncate" title={item.fecha}>
+                          {item.fecha}
+                        </div>
+                        <div className={`py-1.5 px-1 font-semibold truncate ${item.checked ? "text-slate-500 bg-slate-105" : "text-indigo-700 bg-indigo-50/20"}`} title={item.hora ? `Bloque ${item.hora}` : "Sin bloque"}>
+                          {item.hora ? `Bloque ${item.hora}` : "-"}
+                        </div>
                       </div>
+
+                      <p className="text-[10px] text-slate-400 font-light truncate">
+                        Docente: {item.docente}
+                      </p>
                     </div>
                   </div>
                 ))
               ) : (
-                <div className="text-center py-12 text-slate-400 italic">
+                <div className="col-span-full text-center py-12 text-slate-400 italic">
                   No se encontraron pendientes.
                 </div>
               )}
@@ -862,6 +993,11 @@ export default function Home() {
               setObservations([]);
               setPendientes([]);
               setErrorMessage("");
+              setSelectedAsignatura("all");
+              setSelectedCurso("all");
+              setSelectedFecha("all");
+              setPendientesSearch("");
+              setPendientesFilter("all");
             }}
             className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
           >
@@ -987,8 +1123,8 @@ export default function Home() {
                     type="button"
                     onClick={() => setTimeResolution("daily")}
                     className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${timeResolution === "daily"
-                        ? "bg-white text-slate-800 shadow-sm"
-                        : "text-slate-500 hover:text-slate-850"
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-850"
                       }`}
                   >
                     Diario (Líneas)
@@ -997,8 +1133,8 @@ export default function Home() {
                     type="button"
                     onClick={() => setTimeResolution("monthly")}
                     className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${timeResolution === "monthly"
-                        ? "bg-white text-slate-800 shadow-sm"
-                        : "text-slate-500 hover:text-slate-850"
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-850"
                       }`}
                   >
                     Mensual (Líneas)
