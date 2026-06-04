@@ -733,7 +733,7 @@ export default function Home() {
               <div className="h-4 w-4 rounded-full bg-indigo-500 animate-ping" />
             </div>
             <p className="mt-6 text-[11px] font-extrabold uppercase tracking-widest text-slate-200 animate-pulse">
-              Procesando planilla desde Kimche Plus...
+              Cargando planilla automáticamente...
             </p>
           </div>
         )}
@@ -802,7 +802,7 @@ export default function Home() {
               <div className="h-4 w-4 rounded-full bg-indigo-500 animate-ping" />
             </div>
             <p className="mt-6 text-[11px] font-extrabold uppercase tracking-widest text-slate-200 animate-pulse">
-              Procesando planilla desde Kimche Plus...
+              Cargando planilla automáticamente...
             </p>
           </div>
         )}
@@ -1076,7 +1076,7 @@ export default function Home() {
             <div className="h-4 w-4 rounded-full bg-indigo-500 animate-ping" />
           </div>
           <p className="mt-6 text-[11px] font-extrabold uppercase tracking-widest text-slate-200 animate-pulse">
-            Procesando planilla desde Kimche Plus...
+            Cargando planilla automáticamente...
           </p>
         </div>
       )}
