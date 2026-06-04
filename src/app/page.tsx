@@ -736,7 +736,7 @@ export default function Home() {
 
   if (observations.length === 0 && pendientes.length === 0) {
     return (
-      <main className="min-h-screen bg-slate-100 px-4 py-10 text-slate-900 flex items-center justify-center">
+      <main className="flex-grow w-full bg-slate-100 px-4 py-10 text-slate-900 flex items-center justify-center">
         {isLoading && (
           <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
             <div className="relative flex items-center justify-center h-20 w-20">
@@ -805,7 +805,7 @@ export default function Home() {
 
   if (appMode === "pendientes" && pendientes.length > 0) {
     return (
-      <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900">
+      <main className="flex-grow w-full bg-slate-100 px-4 py-8 text-slate-900">
         {isLoading && (
           <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
             <div className="relative flex items-center justify-center h-20 w-20">
@@ -1079,7 +1079,7 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-900">
+    <main className="flex-grow w-full bg-slate-100 px-4 py-8 text-slate-900">
       {isLoading && (
         <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
           <div className="relative flex items-center justify-center h-20 w-20">
