@@ -44,6 +44,8 @@ type Observation = {
   tipo: ObservationKind;
   descripcion: string;
   asignaturaOrCategorizacion: string;
+  funcionario: string;
+  falta: string;
 };
 
 type PendienteItem = {
@@ -361,6 +363,48 @@ export default function Home() {
     return { topPositive: toTop(positives), topNegative: toTop(negatives) };
   }, [observations]);
 
+  const topFuncionarios = useMemo(() => {
+    const counts = new Map<string, { funcionario: string; positivas: number; negativas: number; total: number }>();
+
+    for (const item of observations) {
+      const func = item.funcionario || "No especificado";
+      if (!counts.has(func)) {
+        counts.set(func, { funcionario: func, positivas: 0, negativas: 0, total: 0 });
+      }
+      const data = counts.get(func)!;
+      if (item.tipo === "positiva") {
+        data.positivas += 1;
+        data.total += 1;
+      } else if (item.tipo === "negativa") {
+        data.negativas += 1;
+        data.total += 1;
+      }
+    }
+
+    return [...counts.values()]
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+  }, [observations]);
+
+  const faltasStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    let totalValidos = 0;
+
+    for (const item of observations) {
+      if (!item.falta) continue;
+      const f = item.falta.trim();
+      if (!f) continue;
+      counts.set(f, (counts.get(f) ?? 0) + 1);
+      totalValidos += 1;
+    }
+
+    const data = [...counts.entries()]
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+
+    return { data, totalValidos };
+  }, [observations]);
+
   const { latestPositive, latestNegative } = useMemo(() => {
     let latestPos: Observation | null = null;
     let latestNeg: Observation | null = null;
@@ -495,6 +539,24 @@ export default function Home() {
             const fechaTexto = row["Fecha"]?.trim() ?? "";
             const fechaOrdenable = parseDateToSortable(fechaTexto);
 
+            const rawFunc =
+              row["Nombre docente autor"]?.trim() ||
+              row["Nombre Funcionario"]?.trim() ||
+              row["Funcionario"]?.trim() ||
+              row["Creado por"]?.trim() ||
+              row["Profesor"]?.trim() ||
+              row["Docente"]?.trim() ||
+              "No especificado";
+            const funcionario = rawFunc !== "No especificado" ? capitalizeProperName(rawFunc) : rawFunc;
+
+            const falta =
+              row["Falta"]?.trim() ||
+              row["Detalle de la falta"]?.trim() ||
+              row["Gravedad"]?.trim() ||
+              row["Gravedad de la falta"]?.trim() ||
+              row["Tipo de falta"]?.trim() ||
+              "";
+
             return {
               id: `${fechaTexto}-${nombreCompleto}-${row["Tipo de observación"]?.trim() ?? ""}-${index}`,
               curso: row["Curso"]?.trim() ?? "",
@@ -506,6 +568,8 @@ export default function Home() {
               tipo: normalizeType(row["Tipo de observación"]?.trim() ?? ""),
               descripcion: row["Descripción"]?.trim() ?? "",
               asignaturaOrCategorizacion: row["Asignatura"]?.trim() || row["Categorización"]?.trim() || "",
+              funcionario,
+              falta,
             } satisfies Observation;
           })
           .filter((item) => item.nombreCompleto && item.descripcion && item.tipoOriginal);
@@ -556,6 +620,24 @@ export default function Home() {
           const fechaTexto = normalizedRow["Fecha"]?.trim() ?? "";
           const fechaOrdenable = parseDateToSortable(fechaTexto);
 
+          const rawFunc =
+            normalizedRow["Nombre docente autor"]?.trim() ||
+            normalizedRow["Nombre Funcionario"]?.trim() ||
+            normalizedRow["Funcionario"]?.trim() ||
+            normalizedRow["Creado por"]?.trim() ||
+            normalizedRow["Profesor"]?.trim() ||
+            normalizedRow["Docente"]?.trim() ||
+            "No especificado";
+          const funcionario = rawFunc !== "No especificado" ? capitalizeProperName(rawFunc) : rawFunc;
+
+          const falta =
+            normalizedRow["Falta"]?.trim() ||
+            normalizedRow["Detalle de la falta"]?.trim() ||
+            normalizedRow["Gravedad"]?.trim() ||
+            normalizedRow["Gravedad de la falta"]?.trim() ||
+            normalizedRow["Tipo de falta"]?.trim() ||
+            "";
+
           return {
             id: `${fechaTexto}-${nombreCompleto}-${normalizedRow["Tipo de observación"]?.trim() ?? ""}-${index}`,
             curso: normalizedRow["Curso"]?.trim() ?? "",
@@ -567,6 +649,8 @@ export default function Home() {
             tipo: normalizeType(normalizedRow["Tipo de observación"]?.trim() ?? ""),
             descripcion: normalizedRow["Descripción"]?.trim() ?? "",
             asignaturaOrCategorizacion: normalizedRow["Asignatura"]?.trim() || normalizedRow["Categorización"]?.trim() || "",
+            funcionario,
+            falta,
           } satisfies Observation;
         })
         .filter((item) => item.nombreCompleto && item.descripcion && item.tipoOriginal);
@@ -1507,6 +1591,117 @@ export default function Home() {
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section className="grid gap-4">
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <Users className="h-5 w-5 text-indigo-500" />
+              Top funcionarios con más anotaciones registradas
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                    <th className="px-4 py-3 text-center w-16">Puesto</th>
+                    <th className="px-4 py-3">Funcionario / Profesor</th>
+                    <th className="px-4 py-3 text-center w-28">Positivas</th>
+                    <th className="px-4 py-3 text-center w-28">Negativas</th>
+                    <th className="px-4 py-3 text-center w-28">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topFuncionarios.length > 0 ? (
+                    topFuncionarios.map((func, index) => {
+                      const rank = index + 1;
+                      let rankClass = "text-slate-500 bg-slate-50";
+                      if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
+                      else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
+                      else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+
+                      return (
+                        <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                          <td className="px-4 py-3.5 text-center">
+                            <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
+                              {rank}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 font-medium text-slate-800">
+                            {func.funcionario}
+                          </td>
+                          <td className="px-4 py-3.5 text-center">
+                            <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                              {func.positivas}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 text-center">
+                            <span className="inline-block rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">
+                              {func.negativas}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 text-center">
+                            <span className="inline-block rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-700">
+                              {func.total}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="text-center py-6 text-slate-400 italic">
+                        No se detectó información de funcionarios en la planilla cargada.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section className="grid gap-4">
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-rose-500" />
+              Detalle de faltas registradas
+            </h2>
+            <div className="overflow-x-auto max-h-72 overflow-y-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                    <th className="px-4 py-3">Tipo / Gravedad de Falta</th>
+                    <th className="px-4 py-3 text-center w-28">Cantidad</th>
+                    <th className="px-4 py-3 text-center w-28">Porcentaje</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {faltasStats.totalValidos > 0 ? (
+                    faltasStats.data.map((item, index) => {
+                      const percentage = Math.round((item.value / faltasStats.totalValidos) * 100);
+                      return (
+                        <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                          <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
+                          <td className="px-4 py-3 text-center font-bold text-slate-700">{item.value}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="inline-block rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600">
+                              {percentage}%
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={3} className="text-center py-12 text-slate-400 italic">
+                        No se detectó información de faltas en la planilla cargada (se requieren columnas como "Falta" o "Gravedad").
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
