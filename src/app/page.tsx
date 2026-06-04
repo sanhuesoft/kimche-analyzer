@@ -164,8 +164,7 @@ export default function Home() {
   const [showPositiveTrend, setShowPositiveTrend] = useState(true);
   const [showNegativeTrend, setShowNegativeTrend] = useState(true);
   const [timeResolution, setTimeResolution] = useState<"daily" | "monthly">("daily");
-  const [visibleCount, setVisibleCount] = useState(25);
-  const observerRef = useRef<HTMLDivElement | null>(null);
+
 
   const [appMode, setAppMode] = useState<"observations" | "pendientes">("observations");
   const [pendientes, setPendientes] = useState<PendienteItem[]>([]);
@@ -179,9 +178,7 @@ export default function Home() {
   const [selectedFechaObs, setSelectedFechaObs] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    setVisibleCount(25);
-  }, [searchQuery, quickFilter, observations, selectedAsignaturaObs, selectedCursoObs, selectedFechaObs]);
+
 
   const total = observations.length;
 
@@ -362,19 +359,7 @@ export default function Home() {
     });
   }, [observations, quickFilter, searchQuery, selectedAsignaturaObs, selectedCursoObs, selectedFechaObs]);
 
-  useEffect(() => {
-    if (!observerRef.current) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          setVisibleCount((prev) => prev + 25);
-        }
-      },
-      { threshold: 0.1 }
-    );
-    observer.observe(observerRef.current);
-    return () => observer.disconnect();
-  }, [filteredRows, visibleCount]);
+
 
   const uniqueAsignaturas = useMemo(() => {
     return Array.from(new Set(pendientes.map((p) => p.asignatura).filter(Boolean))).sort();
@@ -447,7 +432,7 @@ export default function Home() {
         const missingHeaders = REQUIRED_HEADERS.filter((header) => !meta.fields?.includes(header));
         if (missingHeaders.length > 0) {
           setObservations([]);
-          setErrorMessage(`Faltan columnas obligatorias: ${missingHeaders.join(", ")}`);
+          setErrorMessage("Kimche Analyzer no puede procesar ese tipo de planilla aún");
           return;
         }
 
@@ -503,7 +488,7 @@ export default function Home() {
       const missingHeaders = REQUIRED_HEADERS.filter((header) => !headers.includes(header));
       if (missingHeaders.length > 0) {
         setObservations([]);
-        setErrorMessage(`Faltan columnas obligatorias: ${missingHeaders.join(", ")}`);
+        setErrorMessage("Kimche Analyzer no puede procesar ese tipo de planilla aún");
         return;
       }
 
@@ -760,7 +745,7 @@ export default function Home() {
             <div>
               <h1 className="text-2xl font-semibold">Kimche Analyzer</h1>
               <p className="text-sm text-slate-500">
-                Carga tu Registro de firmas pendientes o el Registro de observaciones de tu curso (detección automática) y obtén estadísticas mejor organizadas. Para cargar las planillas directamente, habilita la extensión <span className="text-indigo-650 font-bold">Kimche Plus</span>. El análisis se realiza de manera local, por lo que no se comparte ningún dato de tus planillas con nadie.
+                Carga tu Registro de firmas pendientes o el Registro de observaciones de tu curso (detección automática) y obtén estadísticas. El análisis se realiza de manera local, por lo que no se comparte ningún dato con nadie.
               </p>
             </div>
           </div>
@@ -1583,7 +1568,7 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.slice(0, visibleCount).map((row) => (
+                {filteredRows.map((row) => (
                   <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
                     <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{row.fechaTexto || "-"}</td>
                     <td className="px-4 py-3 font-medium whitespace-nowrap">{row.nombreCompleto}</td>
@@ -1598,21 +1583,6 @@ export default function Home() {
               </tbody>
             </table>
           </div>
-
-          {filteredRows.length > visibleCount && (
-            <div ref={observerRef} className="mt-4 py-6 text-center flex flex-col items-center justify-center gap-2">
-              <span className="text-xs text-slate-400">
-                Mostrando {visibleCount} de {filteredRows.length} registros
-              </span>
-              <button
-                type="button"
-                onClick={() => setVisibleCount((prev) => prev + 25)}
-                className="rounded-xl bg-slate-100 px-5 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-200 transition active:scale-95 shadow-sm border border-slate-200"
-              >
-                Cargar más registros...
-              </button>
-            </div>
-          )}
         </section>
       </div>
     </main>
