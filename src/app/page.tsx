@@ -363,27 +363,30 @@ export default function Home() {
     return { topPositive: toTop(positives), topNegative: toTop(negatives) };
   }, [observations]);
 
-  const topFuncionarios = useMemo(() => {
-    const counts = new Map<string, { funcionario: string; positivas: number; negativas: number; total: number }>();
+  const { topPositiveFuncionarios, topNegativeFuncionarios } = useMemo(() => {
+    const positives = new Map<string, number>();
+    const negatives = new Map<string, number>();
 
     for (const item of observations) {
       const func = item.funcionario || "No especificado";
-      if (!counts.has(func)) {
-        counts.set(func, { funcionario: func, positivas: 0, negativas: 0, total: 0 });
-      }
-      const data = counts.get(func)!;
       if (item.tipo === "positiva") {
-        data.positivas += 1;
-        data.total += 1;
-      } else if (item.tipo === "negativa") {
-        data.negativas += 1;
-        data.total += 1;
+        positives.set(func, (positives.get(func) ?? 0) + 1);
+      }
+      if (item.tipo === "negativa") {
+        negatives.set(func, (negatives.get(func) ?? 0) + 1);
       }
     }
 
-    return [...counts.values()]
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 5);
+    const toTop = (source: Map<string, number>) =>
+      [...source.entries()]
+        .map(([funcionario, totalObservaciones]) => ({ funcionario, totalObservaciones }))
+        .sort((a, b) => b.totalObservaciones - a.totalObservaciones)
+        .slice(0, 5);
+
+    return {
+      topPositiveFuncionarios: toTop(positives),
+      topNegativeFuncionarios: toTop(negatives),
+    };
   }, [observations]);
 
   const faltasStats = useMemo(() => {
@@ -466,7 +469,15 @@ export default function Home() {
   }, [pendientes]);
 
   const uniqueAsignaturasObs = useMemo(() => {
-    return Array.from(new Set(observations.map((o) => o.asignaturaOrCategorizacion).filter(Boolean))).sort();
+    const counts = new Map<string, number>();
+    for (const o of observations) {
+      if (o.asignaturaOrCategorizacion) {
+        counts.set(o.asignaturaOrCategorizacion, (counts.get(o.asignaturaOrCategorizacion) ?? 0) + 1);
+      }
+    }
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [observations]);
 
   const uniqueCursosObs = useMemo(() => {
@@ -521,279 +532,299 @@ export default function Home() {
     );
   };
 
-  const parseAndLoadCsv = (file: File) => {
-    Papa.parse<Record<string, string>>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: ({ data, meta }) => {
-        const missingHeaders = REQUIRED_HEADERS.filter((header) => !meta.fields?.includes(header));
-        if (missingHeaders.length > 0) {
-          setObservations([]);
-          setErrorMessage("Kimche Analyzer no puede procesar ese tipo de planilla aún");
-          return;
-        }
+  const processSingleFile = (file: File): Promise<{
+    fileName: string;
+    type: "observations" | "pendientes";
+    observationsData?: Observation[];
+    pendientesData?: PendienteItem[];
+    error?: string;
+  }> => {
+    return new Promise((resolve) => {
+      const fileName = file.name.toLowerCase();
+      if (fileName.endsWith(".csv")) {
+        Papa.parse<Record<string, string>>(file, {
+          header: true,
+          skipEmptyLines: true,
+          complete: ({ data, meta }) => {
+            const missingHeaders = REQUIRED_HEADERS.filter((header) => !meta.fields?.includes(header));
+            if (missingHeaders.length > 0) {
+              resolve({ fileName: file.name, type: "observations", error: "Kimche Analyzer no puede procesar ese tipo de planilla aún" });
+              return;
+            }
 
-        const parsed = data
-          .map((row, index) => {
-            const nombreCompleto = buildStudentName(row);
-            const fechaTexto = row["Fecha"]?.trim() ?? "";
-            const fechaOrdenable = parseDateToSortable(fechaTexto);
+            const parsed = data
+              .map((row, index) => {
+                const nombreCompleto = buildStudentName(row);
+                const fechaTexto = row["Fecha"]?.trim() ?? "";
+                const fechaOrdenable = parseDateToSortable(fechaTexto);
 
-            const rawFunc =
-              row["Nombre docente autor"]?.trim() ||
-              row["Nombre Funcionario"]?.trim() ||
-              row["Funcionario"]?.trim() ||
-              row["Creado por"]?.trim() ||
-              row["Profesor"]?.trim() ||
-              row["Docente"]?.trim() ||
-              "No especificado";
-            const funcionario = rawFunc !== "No especificado" ? capitalizeProperName(rawFunc) : rawFunc;
+                const rawFunc =
+                  row["Nombre docente autor"]?.trim() ||
+                  row["Nombre Funcionario"]?.trim() ||
+                  row["Funcionario"]?.trim() ||
+                  row["Creado por"]?.trim() ||
+                  row["Profesor"]?.trim() ||
+                  row["Docente"]?.trim() ||
+                  "No especificado";
+                const funcionario = rawFunc !== "No especificado" ? capitalizeProperName(rawFunc) : rawFunc;
 
-            const falta =
-              row["Falta"]?.trim() ||
-              row["Detalle de la falta"]?.trim() ||
-              row["Gravedad"]?.trim() ||
-              row["Gravedad de la falta"]?.trim() ||
-              row["Tipo de falta"]?.trim() ||
-              "";
+                const falta =
+                  row["Falta"]?.trim() ||
+                  row["Detalle de la falta"]?.trim() ||
+                  row["Gravedad"]?.trim() ||
+                  row["Gravedad de la falta"]?.trim() ||
+                  row["Tipo de falta"]?.trim() ||
+                  "";
 
-            return {
-              id: `${fechaTexto}-${nombreCompleto}-${row["Tipo de observación"]?.trim() ?? ""}-${index}`,
-              curso: row["Curso"]?.trim() ?? "",
-              numeroLista: row["No. Lista"]?.trim() ?? "",
-              nombreCompleto,
-              fechaTexto,
-              fechaOrdenable,
-              tipoOriginal: row["Tipo de observación"]?.trim() ?? "",
-              tipo: normalizeType(row["Tipo de observación"]?.trim() ?? ""),
-              descripcion: row["Descripción"]?.trim() ?? "",
-              asignaturaOrCategorizacion: row["Asignatura"]?.trim() || row["Categorización"]?.trim() || "",
-              funcionario,
-              falta,
-            } satisfies Observation;
-          })
-          .filter((item) => item.nombreCompleto && item.descripcion && item.tipoOriginal);
+                return {
+                  id: `${file.name}-${fechaTexto}-${nombreCompleto}-${row["Tipo de observación"]?.trim() ?? ""}-${index}`,
+                  curso: row["Curso"]?.trim() ?? "",
+                  numeroLista: row["No. Lista"]?.trim() ?? "",
+                  nombreCompleto,
+                  fechaTexto,
+                  fechaOrdenable,
+                  tipoOriginal: row["Tipo de observación"]?.trim() ?? "",
+                  tipo: normalizeType(row["Tipo de observación"]?.trim() ?? ""),
+                  descripcion: row["Descripción"]?.trim() ?? "",
+                  asignaturaOrCategorizacion: row["Asignatura"]?.trim() || row["Categorización"]?.trim() || "",
+                  funcionario,
+                  falta,
+                } satisfies Observation;
+              })
+              .filter((item) => item.nombreCompleto && item.descripcion && item.tipoOriginal);
 
-        setObservations(parsed);
-      },
-      error: (error) => {
-        setObservations([]);
-        setErrorMessage(`No fue posible leer el archivo: ${error.message}`);
-      },
+            resolve({ fileName: file.name, type: "observations", observationsData: parsed });
+          },
+          error: (error) => {
+            resolve({ fileName: file.name, type: "observations", error: `No fue posible leer el archivo: ${error.message}` });
+          },
+        });
+      } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            const data = new Uint8Array(e.target?.result as ArrayBuffer);
+            const workbook = XLSX.read(data, { type: "array" });
+
+            const firstSheetName = workbook.SheetNames[0];
+            let isPendientes = false;
+
+            const hasPendientesSheetNames = workbook.SheetNames.some(
+              (name) =>
+                name.toLowerCase().includes("firma") ||
+                name.toLowerCase().includes("leccionario") ||
+                name.toLowerCase().includes("registro")
+            );
+
+            if (hasPendientesSheetNames) {
+              isPendientes = true;
+            } else if (firstSheetName) {
+              const worksheet = workbook.Sheets[firstSheetName];
+              const json = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { header: 1 });
+              const headers = (json[0] || []).map((h: any) => String(h).trim().toLowerCase());
+              isPendientes = headers.includes("docente titular") || headers.includes("docente") || headers.includes("estado de la firma") || headers.includes("hora de clase");
+            }
+
+            if (isPendientes) {
+              const items: PendienteItem[] = [];
+
+              const sheet1Name = workbook.SheetNames.find((name) =>
+                name.toLowerCase().includes("firma")
+              ) || workbook.SheetNames[0];
+
+              if (sheet1Name) {
+                const sheet1 = workbook.Sheets[sheet1Name];
+                const data1 = XLSX.utils.sheet_to_json<Record<string, any>>(sheet1, {
+                  defval: "",
+                  raw: false,
+                });
+                data1.forEach((row, index) => {
+                  const docente = row["Docente titular"]?.trim() ?? row["Docente"]?.trim() ?? "";
+                  const curso = row["Curso"]?.trim() ?? "";
+                  const asignatura = row["Asignatura"]?.trim() ?? "";
+                  const fecha = row["Fecha"]?.trim() ?? "";
+                  const hora = row["Hora de clase"]?.trim() ?? row["Hora"]?.trim() ?? "";
+
+                  if (docente || curso || asignatura) {
+                    items.push({
+                      id: `firma-${file.name}-${fecha}-${hora}-${asignatura}-${index}`,
+                      tipo: "firma",
+                      docente,
+                      curso,
+                      asignatura,
+                      fecha,
+                      hora,
+                      estadoFirma: row["Estado de la firma"]?.trim() ?? "",
+                      estadoRegistro: row["Estado del registro"]?.trim() ?? "",
+                      checked: false,
+                    });
+                  }
+                });
+              }
+
+              const sheet2Name = workbook.SheetNames.find((name) =>
+                name.toLowerCase().includes("leccionario") || name.toLowerCase().includes("registro")
+              ) || workbook.SheetNames[1];
+
+              if (sheet2Name) {
+                const sheet2 = workbook.Sheets[sheet2Name];
+                const data2 = XLSX.utils.sheet_to_json<Record<string, any>>(sheet2, {
+                  defval: "",
+                  raw: false,
+                });
+                data2.forEach((row, index) => {
+                  const docente = row["Docente titular"]?.trim() ?? row["Docente"]?.trim() ?? "";
+                  const curso = row["Curso"]?.trim() ?? "";
+                  const asignatura = row["Asignatura"]?.trim() ?? "";
+                  const fecha = row["Fecha"]?.trim() ?? "";
+                  const hora = row["Hora de clase"]?.trim() ?? row["Hora"]?.trim() ?? "";
+
+                  if (docente || curso || asignatura) {
+                    items.push({
+                      id: `leccionario-${file.name}-${fecha}-${hora}-${asignatura}-${index}`,
+                      tipo: "leccionario",
+                      docente,
+                      curso,
+                      asignatura,
+                      fecha,
+                      hora,
+                      estadoRegistro: row["Estado del registro"]?.trim() ?? "",
+                      checked: false,
+                    });
+                  }
+                });
+              }
+
+              if (items.length === 0) {
+                resolve({ fileName: file.name, type: "pendientes", error: "No se encontraron registros pendientes en el archivo." });
+              } else {
+                resolve({ fileName: file.name, type: "pendientes", pendientesData: items });
+              }
+            } else {
+              const worksheet = workbook.Sheets[firstSheetName];
+              const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
+                defval: "",
+                raw: false,
+              });
+
+              if (jsonData.length === 0) {
+                resolve({ fileName: file.name, type: "observations", error: "El archivo Excel está vacío." });
+                return;
+              }
+
+              const headers = Object.keys(jsonData[0]);
+              const missingHeaders = REQUIRED_HEADERS.filter((header) => !headers.includes(header));
+              if (missingHeaders.length > 0) {
+                resolve({ fileName: file.name, type: "observations", error: "Kimche Analyzer no puede procesar ese tipo de planilla aún" });
+                return;
+              }
+
+              const parsed = jsonData
+                .map((row, index) => {
+                  const normalizedRow: Record<string, string> = {};
+                  for (const key of Object.keys(row)) {
+                    normalizedRow[key] = String(row[key]);
+                  }
+
+                  const nombreCompleto = buildStudentName(normalizedRow);
+                  const fechaTexto = normalizedRow["Fecha"]?.trim() ?? "";
+                  const fechaOrdenable = parseDateToSortable(fechaTexto);
+
+                  const rawFunc =
+                    normalizedRow["Nombre docente autor"]?.trim() ||
+                    normalizedRow["Nombre Funcionario"]?.trim() ||
+                    normalizedRow["Funcionario"]?.trim() ||
+                    normalizedRow["Creado por"]?.trim() ||
+                    normalizedRow["Profesor"]?.trim() ||
+                    normalizedRow["Docente"]?.trim() ||
+                    "No especificado";
+                  const funcionario = rawFunc !== "No especificado" ? capitalizeProperName(rawFunc) : rawFunc;
+
+                  const falta =
+                    normalizedRow["Falta"]?.trim() ||
+                    normalizedRow["Detalle de la falta"]?.trim() ||
+                    normalizedRow["Gravedad"]?.trim() ||
+                    normalizedRow["Gravedad de la falta"]?.trim() ||
+                    normalizedRow["Tipo de falta"]?.trim() ||
+                    "";
+
+                  return {
+                    id: `${file.name}-${fechaTexto}-${nombreCompleto}-${normalizedRow["Tipo de observación"]?.trim() ?? ""}-${index}`,
+                    curso: normalizedRow["Curso"]?.trim() ?? "",
+                    numeroLista: normalizedRow["No. Lista"]?.trim() ?? "",
+                    nombreCompleto,
+                    fechaTexto,
+                    fechaOrdenable,
+                    tipoOriginal: normalizedRow["Tipo de observación"]?.trim() ?? "",
+                    tipo: normalizeType(normalizedRow["Tipo de observación"]?.trim() ?? ""),
+                    descripcion: normalizedRow["Descripción"]?.trim() ?? "",
+                    asignaturaOrCategorizacion: normalizedRow["Asignatura"]?.trim() || normalizedRow["Categorización"]?.trim() || "",
+                    funcionario,
+                    falta,
+                  } satisfies Observation;
+                })
+                .filter((item) => item.nombreCompleto && item.descripcion && item.tipoOriginal);
+
+              resolve({ fileName: file.name, type: "observations", observationsData: parsed });
+            }
+          } catch (error: any) {
+            resolve({ fileName: file.name, type: "observations", error: `No fue posible leer el archivo Excel: ${error.message}` });
+          }
+        };
+        reader.onerror = () => {
+          resolve({ fileName: file.name, type: "observations", error: "Error al leer el archivo." });
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        resolve({ fileName: file.name, type: "observations", error: "Por favor, sube un archivo CSV o Excel (.xlsx, .xls)." });
+      }
     });
   };
 
-  const processObservationsWorkbook = (workbook: XLSX.WorkBook) => {
-    try {
-      const firstSheetName = workbook.SheetNames[0];
-      if (!firstSheetName) {
-        setErrorMessage("El archivo Excel no contiene hojas de trabajo.");
-        return;
-      }
-      const worksheet = workbook.Sheets[firstSheetName];
-      const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
-        defval: "",
-        raw: false,
-      });
-
-      if (jsonData.length === 0) {
-        setErrorMessage("El archivo Excel está vacío.");
-        return;
-      }
-
-      const headers = Object.keys(jsonData[0]);
-      const missingHeaders = REQUIRED_HEADERS.filter((header) => !headers.includes(header));
-      if (missingHeaders.length > 0) {
-        setObservations([]);
-        setErrorMessage("Kimche Analyzer no puede procesar ese tipo de planilla aún");
-        return;
-      }
-
-      const parsed = jsonData
-        .map((row, index) => {
-          const normalizedRow: Record<string, string> = {};
-          for (const key of Object.keys(row)) {
-            normalizedRow[key] = String(row[key]);
-          }
-
-          const nombreCompleto = buildStudentName(normalizedRow);
-          const fechaTexto = normalizedRow["Fecha"]?.trim() ?? "";
-          const fechaOrdenable = parseDateToSortable(fechaTexto);
-
-          const rawFunc =
-            normalizedRow["Nombre docente autor"]?.trim() ||
-            normalizedRow["Nombre Funcionario"]?.trim() ||
-            normalizedRow["Funcionario"]?.trim() ||
-            normalizedRow["Creado por"]?.trim() ||
-            normalizedRow["Profesor"]?.trim() ||
-            normalizedRow["Docente"]?.trim() ||
-            "No especificado";
-          const funcionario = rawFunc !== "No especificado" ? capitalizeProperName(rawFunc) : rawFunc;
-
-          const falta =
-            normalizedRow["Falta"]?.trim() ||
-            normalizedRow["Detalle de la falta"]?.trim() ||
-            normalizedRow["Gravedad"]?.trim() ||
-            normalizedRow["Gravedad de la falta"]?.trim() ||
-            normalizedRow["Tipo de falta"]?.trim() ||
-            "";
-
-          return {
-            id: `${fechaTexto}-${nombreCompleto}-${normalizedRow["Tipo de observación"]?.trim() ?? ""}-${index}`,
-            curso: normalizedRow["Curso"]?.trim() ?? "",
-            numeroLista: normalizedRow["No. Lista"]?.trim() ?? "",
-            nombreCompleto,
-            fechaTexto,
-            fechaOrdenable,
-            tipoOriginal: normalizedRow["Tipo de observación"]?.trim() ?? "",
-            tipo: normalizeType(normalizedRow["Tipo de observación"]?.trim() ?? ""),
-            descripcion: normalizedRow["Descripción"]?.trim() ?? "",
-            asignaturaOrCategorizacion: normalizedRow["Asignatura"]?.trim() || normalizedRow["Categorización"]?.trim() || "",
-            funcionario,
-            falta,
-          } satisfies Observation;
-        })
-        .filter((item) => item.nombreCompleto && item.descripcion && item.tipoOriginal);
-
-      setObservations(parsed);
-    } catch (error: any) {
-      setObservations([]);
-      setErrorMessage(`No fue posible leer el archivo Excel: ${error.message}`);
-    }
-  };
-
-  const processPendientesWorkbook = (workbook: XLSX.WorkBook) => {
-    try {
-      const items: PendienteItem[] = [];
-
-      const sheet1Name = workbook.SheetNames.find((name) =>
-        name.toLowerCase().includes("firma")
-      ) || workbook.SheetNames[0];
-
-      if (sheet1Name) {
-        const sheet1 = workbook.Sheets[sheet1Name];
-        const data1 = XLSX.utils.sheet_to_json<Record<string, any>>(sheet1, {
-          defval: "",
-          raw: false,
-        });
-        data1.forEach((row, index) => {
-          const docente = row["Docente titular"]?.trim() ?? row["Docente"]?.trim() ?? "";
-          const curso = row["Curso"]?.trim() ?? "";
-          const asignatura = row["Asignatura"]?.trim() ?? "";
-          const fecha = row["Fecha"]?.trim() ?? "";
-          const hora = row["Hora de clase"]?.trim() ?? row["Hora"]?.trim() ?? "";
-
-          if (docente || curso || asignatura) {
-            items.push({
-              id: `firma-${fecha}-${hora}-${asignatura}-${index}`,
-              tipo: "firma",
-              docente,
-              curso,
-              asignatura,
-              fecha,
-              hora,
-              estadoFirma: row["Estado de la firma"]?.trim() ?? "",
-              estadoRegistro: row["Estado del registro"]?.trim() ?? "",
-              checked: false,
-            });
-          }
-        });
-      }
-
-      const sheet2Name = workbook.SheetNames.find((name) =>
-        name.toLowerCase().includes("leccionario") || name.toLowerCase().includes("registro")
-      ) || workbook.SheetNames[1];
-
-      if (sheet2Name) {
-        const sheet2 = workbook.Sheets[sheet2Name];
-        const data2 = XLSX.utils.sheet_to_json<Record<string, any>>(sheet2, {
-          defval: "",
-          raw: false,
-        });
-        data2.forEach((row, index) => {
-          const docente = row["Docente titular"]?.trim() ?? row["Docente"]?.trim() ?? "";
-          const curso = row["Curso"]?.trim() ?? "";
-          const asignatura = row["Asignatura"]?.trim() ?? "";
-          const fecha = row["Fecha"]?.trim() ?? "";
-          const hora = row["Hora de clase"]?.trim() ?? row["Hora"]?.trim() ?? "";
-
-          if (docente || curso || asignatura) {
-            items.push({
-              id: `leccionario-${fecha}-${hora}-${asignatura}-${index}`,
-              tipo: "leccionario",
-              docente,
-              curso,
-              asignatura,
-              fecha,
-              hora,
-              estadoRegistro: row["Estado del registro"]?.trim() ?? "",
-              checked: false,
-            });
-          }
-        });
-      }
-
-      if (items.length === 0) {
-        setErrorMessage("No se encontraron registros pendientes en el archivo.");
-        return;
-      }
-
-      setPendientes(items);
-    } catch (error: any) {
-      setErrorMessage(`Error al leer el archivo de pendientes: ${error.message}`);
-    }
-  };
-
-  const handleFile = (file: File) => {
+  const handleFiles = async (files: File[]) => {
+    if (files.length === 0) return;
     setErrorMessage("");
-    const fileName = file.name.toLowerCase();
+    setIsLoading(true);
 
-    if (fileName.endsWith(".csv")) {
-      setAppMode("observations");
-      parseAndLoadCsv(file);
-    } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        try {
-          const data = new Uint8Array(e.target?.result as ArrayBuffer);
-          const workbook = XLSX.read(data, { type: "array" });
+    try {
+      const results = await Promise.all(files.map(processSingleFile));
 
-          const firstSheetName = workbook.SheetNames[0];
-          let isPendientes = false;
+      const failed = results.find((r) => r.error);
+      if (failed) {
+        setErrorMessage(`Error en archivo ${failed.fileName}: ${failed.error}`);
+        return;
+      }
 
-          const hasPendientesSheetNames = workbook.SheetNames.some(
-            (name) =>
-              name.toLowerCase().includes("firma") ||
-              name.toLowerCase().includes("leccionario") ||
-              name.toLowerCase().includes("registro")
-          );
+      const firstType = results[0].type;
+      const allSameType = results.every((r) => r.type === firstType);
+      if (!allSameType) {
+        setErrorMessage("Todos los archivos cargados al mismo tiempo deben ser del mismo tipo (todos de Firmas/Leccionarios o todos de Observaciones)");
+        return;
+      }
 
-          if (hasPendientesSheetNames) {
-            isPendientes = true;
-          } else if (firstSheetName) {
-            const worksheet = workbook.Sheets[firstSheetName];
-            const json = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { header: 1 });
-            const headers = (json[0] || []).map((h: any) => String(h).trim().toLowerCase());
-            isPendientes = headers.includes("docente titular") || headers.includes("docente") || headers.includes("estado de la firma") || headers.includes("hora de clase");
+      if (firstType === "observations") {
+        const mergedObs: Observation[] = [];
+        results.forEach((r) => {
+          if (r.observationsData) {
+            mergedObs.push(...r.observationsData);
           }
-
-          if (isPendientes) {
-            setAppMode("pendientes");
-            processPendientesWorkbook(workbook);
-          } else {
-            setAppMode("observations");
-            processObservationsWorkbook(workbook);
+        });
+        setAppMode("observations");
+        setObservations(mergedObs);
+      } else {
+        const mergedPendientes: PendienteItem[] = [];
+        results.forEach((r) => {
+          if (r.pendientesData) {
+            mergedPendientes.push(...r.pendientesData);
           }
-        } catch (error: any) {
-          setErrorMessage(`No fue posible leer el archivo Excel: ${error.message}`);
-        }
-      };
-      reader.onerror = () => {
-        setErrorMessage("Error al leer el archivo.");
-      };
-      reader.readAsArrayBuffer(file);
-    } else {
-      setErrorMessage("Por favor, sube un archivo CSV o Excel (.xlsx, .xls).");
+        });
+        setAppMode("pendientes");
+        setPendientes(mergedPendientes);
+      }
+    } catch (err: any) {
+      setErrorMessage(`Error procesando los archivos: ${err.message}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -818,13 +849,13 @@ export default function Home() {
               const file = new File([bytes], fileName, {
                 type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
               });
-              handleFile(file);
+              handleFiles([file]);
             } else if (message.data instanceof Uint8Array || message.data instanceof ArrayBuffer) {
               const bytes = message.data instanceof Uint8Array ? message.data : new Uint8Array(message.data);
               const file = new File([bytes], fileName, {
                 type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
               });
-              handleFile(file);
+              handleFiles([file]);
             }
           } catch (err: any) {
             setErrorMessage(`Error al procesar archivo de la extensión: ${err.message}`);
@@ -839,21 +870,21 @@ export default function Home() {
     return () => {
       window.removeEventListener("message", handleExtensionMessage);
     };
-  }, [handleFile]);
+  }, [handleFiles]);
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    handleFile(file);
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    if (files.length === 0) return;
+    handleFiles(files);
     event.target.value = "";
   };
 
   const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
     setIsDragging(false);
-    const file = event.dataTransfer.files?.[0];
-    if (!file) return;
-    handleFile(file);
+    const files = event.dataTransfer.files ? Array.from(event.dataTransfer.files) : [];
+    if (files.length === 0) return;
+    handleFiles(files);
   };
 
   if (observations.length === 0 && pendientes.length === 0) {
@@ -911,6 +942,7 @@ export default function Home() {
               accept=".csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
               className="hidden"
               onChange={handleInputChange}
+              multiple
             />
           </label>
 
@@ -1225,26 +1257,34 @@ export default function Home() {
               Visualización y métricas de observaciones de convivencia escolar cargadas.
             </p>
           </div>
-          <button
-            onClick={() => {
-              setObservations([]);
-              setPendientes([]);
-              setErrorMessage("");
-              setSelectedAsignatura("all");
-              setSelectedCurso("all");
-              setSelectedFecha("all");
-              setPendientesSearch("");
-              setPendientesFilter("all");
-              setSelectedAsignaturaObs("all");
-              setSelectedCursoObs("all");
-              setSelectedFechaObs("all");
-              setSearchQuery("");
-              setQuickFilter("all");
-            }}
-            className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
-          >
-            Subir otro archivo
-          </button>
+          <div className="flex items-center gap-3 print:hidden">
+            <button
+              onClick={() => {
+                setObservations([]);
+                setPendientes([]);
+                setErrorMessage("");
+                setSelectedAsignatura("all");
+                setSelectedCurso("all");
+                setSelectedFecha("all");
+                setPendientesSearch("");
+                setPendientesFilter("all");
+                setSelectedAsignaturaObs("all");
+                setSelectedCursoObs("all");
+                setSelectedFechaObs("all");
+                setSearchQuery("");
+                setQuickFilter("all");
+              }}
+              className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
+            >
+              Subir otro archivo
+            </button>
+            <button
+              onClick={() => window.print()}
+              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition active:scale-95 shadow-sm whitespace-nowrap"
+            >
+              Exportar PDF
+            </button>
+          </div>
         </header>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1597,74 +1637,113 @@ export default function Home() {
           </article>
         </section>
 
-        <section className="grid gap-4">
+        <section className="grid gap-4 lg:grid-cols-2">
+          {/* Tarjeta 1: Funcionarios con más positivas */}
           <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <Users className="h-5 w-5 text-indigo-500" />
-              Top funcionarios con más anotaciones registradas
+              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              Top 5 funcionarios con más positivas
             </h2>
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500 font-medium">
                     <th className="px-4 py-3 text-center w-16">Puesto</th>
-                    <th className="px-4 py-3">Funcionario / Profesor</th>
-                    <th className="px-4 py-3 text-center w-28">Positivas</th>
-                    <th className="px-4 py-3 text-center w-28">Negativas</th>
-                    <th className="px-4 py-3 text-center w-28">Total</th>
+                    <th className="px-4 py-3">Funcionario / Docente</th>
+                    <th className="px-4 py-3 text-center w-28">Anotaciones</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topFuncionarios.length > 0 ? (
-                    topFuncionarios.map((func, index) => {
-                      const rank = index + 1;
-                      let rankClass = "text-slate-500 bg-slate-50";
-                      if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
-                      else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
-                      else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+                  {Array.from({ length: 5 }).map((_, index) => {
+                    const pos = topPositiveFuncionarios[index];
+                    const rank = index + 1;
 
-                      return (
-                        <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
-                          <td className="px-4 py-3.5 text-center">
-                            <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
-                              {rank}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3.5 font-medium text-slate-800">
-                            {func.funcionario}
-                          </td>
-                          <td className="px-4 py-3.5 text-center">
+                    let rankClass = "text-slate-500 bg-slate-50";
+                    if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
+                    else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
+                    else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+
+                    return (
+                      <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                        <td className="px-4 py-3.5 text-center">
+                          <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
+                            {rank}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 font-medium text-slate-800">
+                          {pos ? pos.funcionario : <span className="text-slate-400 font-normal">-</span>}
+                        </td>
+                        <td className="px-4 py-3.5 text-center">
+                          {pos ? (
                             <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
-                              {func.positivas}
+                              {pos.totalObservaciones}
                             </span>
-                          </td>
-                          <td className="px-4 py-3.5 text-center">
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          {/* Tarjeta 2: Funcionarios con más negativas */}
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-rose-500" />
+              Top 5 funcionarios con más negativas
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                    <th className="px-4 py-3 text-center w-16">Puesto</th>
+                    <th className="px-4 py-3">Funcionario / Docente</th>
+                    <th className="px-4 py-3 text-center w-28">Anotaciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 5 }).map((_, index) => {
+                    const neg = topNegativeFuncionarios[index];
+                    const rank = index + 1;
+
+                    let rankClass = "text-slate-500 bg-slate-50";
+                    if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
+                    else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
+                    else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+
+                    return (
+                      <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                        <td className="px-4 py-3.5 text-center">
+                          <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
+                            {rank}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 font-medium text-slate-800">
+                          {neg ? neg.funcionario : <span className="text-slate-400 font-normal">-</span>}
+                        </td>
+                        <td className="px-4 py-3.5 text-center">
+                          {neg ? (
                             <span className="inline-block rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">
-                              {func.negativas}
+                              {neg.totalObservaciones}
                             </span>
-                          </td>
-                          <td className="px-4 py-3.5 text-center">
-                            <span className="inline-block rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-700">
-                              {func.total}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={5} className="text-center py-6 text-slate-400 italic">
-                        No se detectó información de funcionarios en la planilla cargada.
-                      </td>
-                    </tr>
-                  )}
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           </article>
         </section>
 
-        <section className="grid gap-4">
+        <section className="grid gap-4 print:hidden">
           <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
               <AlertCircle className="h-5 w-5 text-rose-500" />
@@ -1708,7 +1787,7 @@ export default function Home() {
           </article>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm print:hidden">
           <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <h3 className="font-semibold text-slate-800 flex items-center gap-2">
@@ -1776,9 +1855,9 @@ export default function Home() {
                   className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
                 >
                   <option value="all">Todas</option>
-                  {uniqueAsignaturasObs.map((asig) => (
-                    <option key={asig} value={asig}>
-                      {asig}
+                  {uniqueAsignaturasObs.map((item) => (
+                    <option key={item.name} value={item.name}>
+                      {item.name} ({item.count})
                     </option>
                   ))}
                 </select>

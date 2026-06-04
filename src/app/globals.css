@@ -16,3 +16,62 @@ body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
     Arial, sans-serif;
 }
+
+@media print {
+  @page {
+    margin: 12mm 15mm;
+  }
+
+  body, main, #__next {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Reset layout, remove fills/shadows, add simple border */
+  main, header, section, article {
+    background-color: white !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    border-color: #cbd5e1 !important;
+    color: black !important;
+  }
+
+  /* Style cards as simple outlined panels to save ink */
+  article {
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 8px !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Re-enable correct black/gray text colors on printed elements */
+  h1, h2, h3, h4, p, span, td, th {
+    color: black !important;
+  }
+
+  .text-white, 
+  .text-blue-100, 
+  .text-emerald-100, 
+  .text-rose-100, 
+  .text-indigo-100 {
+    color: #475569 !important;
+  }
+
+  /* Avoid cutting off scrollable list content and tables */
+  .overflow-x-auto, 
+  .overflow-y-auto, 
+  .max-h-72 {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  /* Avoid row split across pages */
+  tr {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  th {
+    border-bottom: 2px solid #94a3b8 !important;
+  }
+}
