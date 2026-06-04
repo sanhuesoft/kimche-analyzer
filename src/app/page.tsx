@@ -740,7 +740,7 @@ export default function Home() {
             <div>
               <h1 className="text-2xl font-semibold">Kimche Analyzer</h1>
               <p className="text-sm text-slate-500">
-                Carga tu Registro de firmas pendientes o el Registro de observaciones de tu curso (detección automática) y obtén estadísticas mejor organizadas. El análisis se realiza de manera local, por lo que no se comparte ningún dato de tus planillas con nadie. También puedes descargar e instalar la extensión para Chrome <a href="/kimche-plus.crx" className="text-indigo-650 hover:text-indigo-800 font-semibold underline">Kimche Plus</a> para cargar las planillas directamente.
+                Carga tu Registro de firmas pendientes o el Registro de observaciones de tu curso (detección automática) y obtén estadísticas mejor organizadas. Para cargar las planillas directamente, habilita la extensión <span className="text-indigo-650 font-bold">Kimche Plus</span>. El análisis se realiza de manera local, por lo que no se comparte ningún dato de tus planillas con nadie.
               </p>
             </div>
           </div>
