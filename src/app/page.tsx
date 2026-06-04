@@ -93,6 +93,49 @@ function parseDateToSortable(value: string) {
   return "";
 }
 
+function formatDateToVerbal(dateStr: string): string {
+  if (!dateStr) return "";
+  const clean = dateStr.trim();
+  const monthsNames = [
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+  ];
+
+  const latamMatch = clean.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})/);
+  if (latamMatch) {
+    const [, d, m] = latamMatch;
+    const day = parseInt(d, 10);
+    const monthNum = parseInt(m, 10);
+    const monthName = monthsNames[monthNum - 1] || "";
+    if (monthName) {
+      return `${day} de ${monthName}`;
+    }
+  }
+
+  const isoMatch = clean.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoMatch) {
+    const [, , m, d] = isoMatch;
+    const day = parseInt(d, 10);
+    const monthNum = parseInt(m, 10);
+    const monthName = monthsNames[monthNum - 1] || "";
+    if (monthName) {
+      return `${day} de ${monthName}`;
+    }
+  }
+
+  return dateStr;
+}
+
 function normalizeType(typeValue: string): ObservationKind {
   const value = typeValue.toLowerCase().normalize("NFD").replace(DIACRITICS_REGEX, "");
   if (value.includes("anotacion positiva")) return "positiva";
@@ -370,7 +413,12 @@ export default function Home() {
   }, [pendientes]);
 
   const uniqueFechas = useMemo(() => {
-    return Array.from(new Set(pendientes.map((p) => p.fecha).filter(Boolean))).sort();
+    const rawFechas = Array.from(new Set(pendientes.map((p) => p.fecha).filter(Boolean)));
+    return rawFechas.sort((a, b) => {
+      const dateA = parseDateToSortable(a);
+      const dateB = parseDateToSortable(b);
+      return dateA.localeCompare(dateB);
+    });
   }, [pendientes]);
 
   const uniqueAsignaturasObs = useMemo(() => {
@@ -382,7 +430,12 @@ export default function Home() {
   }, [observations]);
 
   const uniqueFechasObs = useMemo(() => {
-    return Array.from(new Set(observations.map((o) => o.fechaTexto).filter(Boolean))).sort();
+    const rawFechas = Array.from(new Set(observations.map((o) => o.fechaTexto).filter(Boolean)));
+    return rawFechas.sort((a, b) => {
+      const dateA = parseDateToSortable(a);
+      const dateB = parseDateToSortable(b);
+      return dateA.localeCompare(dateB);
+    });
   }, [observations]);
 
   const sortedPendientes = useMemo(() => {
@@ -987,7 +1040,7 @@ export default function Home() {
                     <option value="all">Todas</option>
                     {uniqueFechas.map((f) => (
                       <option key={f} value={f}>
-                        {f}
+                        {formatDateToVerbal(f)}
                       </option>
                     ))}
                   </select>
@@ -1549,7 +1602,7 @@ export default function Home() {
                   <option value="all">Todas</option>
                   {uniqueFechasObs.map((f) => (
                     <option key={f} value={f}>
-                      {f}
+                      {formatDateToVerbal(f)}
                     </option>
                   ))}
                 </select>
