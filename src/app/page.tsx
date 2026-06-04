@@ -654,6 +654,44 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    const handleExtensionMessage = (event: MessageEvent) => {
+      const message = event.data;
+      if (message && message.type === "KIMCHE_EXT_FILE") {
+        try {
+          const fileName = message.name || "archivo.xlsx";
+          
+          if (message.base64) {
+            const binaryString = window.atob(message.base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            
+            const file = new File([bytes], fileName, {
+              type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            });
+            handleFile(file);
+          } else if (message.data instanceof Uint8Array || message.data instanceof ArrayBuffer) {
+            const bytes = message.data instanceof Uint8Array ? message.data : new Uint8Array(message.data);
+            const file = new File([bytes], fileName, {
+              type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            });
+            handleFile(file);
+          }
+        } catch (err: any) {
+          setErrorMessage(`Error al procesar archivo de la extensión: ${err.message}`);
+        }
+      }
+    };
+
+    window.addEventListener("message", handleExtensionMessage);
+    return () => {
+      window.removeEventListener("message", handleExtensionMessage);
+    };
+  }, [handleFile]);
+
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
