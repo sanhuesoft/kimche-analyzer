@@ -174,11 +174,14 @@ export default function Home() {
   const [selectedAsignatura, setSelectedAsignatura] = useState<string>("all");
   const [selectedCurso, setSelectedCurso] = useState<string>("all");
   const [selectedFecha, setSelectedFecha] = useState<string>("all");
+  const [selectedAsignaturaObs, setSelectedAsignaturaObs] = useState<string>("all");
+  const [selectedCursoObs, setSelectedCursoObs] = useState<string>("all");
+  const [selectedFechaObs, setSelectedFechaObs] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     setVisibleCount(25);
-  }, [searchQuery, quickFilter, observations]);
+  }, [searchQuery, quickFilter, observations, selectedAsignaturaObs, selectedCursoObs, selectedFechaObs]);
 
   const total = observations.length;
 
@@ -193,7 +196,9 @@ export default function Home() {
   }, [observations]);
 
   const positiveObservationsPercentage =
-    total > 0 ? Math.round((summary.positivas / total) * 100) : 0;
+    (summary.positivas + summary.negativas) > 0
+      ? Math.round((summary.positivas / (summary.positivas + summary.negativas)) * 100)
+      : 0;
 
   const pieData = useMemo(() => {
     let positivas = 0;
@@ -350,9 +355,12 @@ export default function Home() {
     return observations.filter((item) => {
       const matchesSearch = !term || item.nombreCompleto.toLowerCase().includes(term);
       const matchesType = quickFilter === "all" || item.tipo === quickFilter;
-      return matchesSearch && matchesType;
+      const matchesAsignatura = selectedAsignaturaObs === "all" || item.asignaturaOrCategorizacion === selectedAsignaturaObs;
+      const matchesCurso = selectedCursoObs === "all" || item.curso === selectedCursoObs;
+      const matchesFecha = selectedFechaObs === "all" || item.fechaTexto === selectedFechaObs;
+      return matchesSearch && matchesType && matchesAsignatura && matchesCurso && matchesFecha;
     });
-  }, [observations, quickFilter, searchQuery]);
+  }, [observations, quickFilter, searchQuery, selectedAsignaturaObs, selectedCursoObs, selectedFechaObs]);
 
   useEffect(() => {
     if (!observerRef.current) return;
@@ -379,6 +387,18 @@ export default function Home() {
   const uniqueFechas = useMemo(() => {
     return Array.from(new Set(pendientes.map((p) => p.fecha).filter(Boolean))).sort();
   }, [pendientes]);
+
+  const uniqueAsignaturasObs = useMemo(() => {
+    return Array.from(new Set(observations.map((o) => o.asignaturaOrCategorizacion).filter(Boolean))).sort();
+  }, [observations]);
+
+  const uniqueCursosObs = useMemo(() => {
+    return Array.from(new Set(observations.map((o) => o.curso).filter(Boolean))).sort();
+  }, [observations]);
+
+  const uniqueFechasObs = useMemo(() => {
+    return Array.from(new Set(observations.map((o) => o.fechaTexto).filter(Boolean))).sort();
+  }, [observations]);
 
   const sortedPendientes = useMemo(() => {
     const term = pendientesSearch.toLowerCase().trim();
@@ -819,6 +839,11 @@ export default function Home() {
                 setSelectedFecha("all");
                 setPendientesSearch("");
                 setPendientesFilter("all");
+                setSelectedAsignaturaObs("all");
+                setSelectedCursoObs("all");
+                setSelectedFechaObs("all");
+                setSearchQuery("");
+                setQuickFilter("all");
               }}
               className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
             >
@@ -1088,6 +1113,11 @@ export default function Home() {
               setSelectedFecha("all");
               setPendientesSearch("");
               setPendientesFilter("all");
+              setSelectedAsignaturaObs("all");
+              setSelectedCursoObs("all");
+              setSelectedFechaObs("all");
+              setSearchQuery("");
+              setQuickFilter("all");
             }}
             className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
           >
@@ -1096,32 +1126,69 @@ export default function Home() {
         </header>
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-sm text-slate-500">Observaciones procesadas</p>
-            <p className="mt-3 text-3xl font-semibold">{total}</p>
-          </article>
-          <article className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-emerald-700">Anotaciones positivas</p>
-              <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+          {/* Observaciones procesadas */}
+          <article className="relative overflow-hidden rounded-xl bg-blue-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+            <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+            <div className="relative z-10 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                  <Users className="h-4 w-4" />
+                </div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">Observaciones procesadas</p>
+              </div>
+              <p className="text-2xl font-extrabold">{total}</p>
             </div>
-            <p className="mt-3 text-3xl font-semibold text-emerald-700">{summary.positivas}</p>
           </article>
-          <article className="rounded-2xl border border-rose-200 bg-rose-50 p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-rose-700">Anotaciones negativas</p>
-              <AlertCircle className="h-5 w-5 text-rose-600" />
+
+          {/* Anotaciones positivas */}
+          <article className="relative overflow-hidden rounded-xl bg-emerald-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+            <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+            <div className="relative z-10 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                  <CheckCircle2 className="h-4 w-4" />
+                </div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Anotaciones positivas</p>
+              </div>
+              <p className="text-2xl font-extrabold">{summary.positivas}</p>
             </div>
-            <p className="mt-3 text-3xl font-semibold text-rose-700">{summary.negativas}</p>
           </article>
-          <article className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 shadow-sm">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-indigo-700">Ratio de convivencia</p>
-              <Star className="h-5 w-5 text-indigo-600" />
+
+          {/* Anotaciones negativas */}
+          <article className="relative overflow-hidden rounded-xl bg-rose-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+            <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+            <div className="relative z-10 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                  <AlertCircle className="h-4 w-4" />
+                </div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-rose-100">Anotaciones negativas</p>
+              </div>
+              <p className="text-2xl font-extrabold">{summary.negativas}</p>
             </div>
-            <p className="mt-3 text-3xl font-semibold text-indigo-700">
-              {positiveObservationsPercentage}%
-            </p>
+          </article>
+
+          {/* Ratio de convivencia */}
+          <article className="group cursor-help relative overflow-visible rounded-xl bg-indigo-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+            <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none rounded-xl" />
+            <div className="relative z-10 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                  <Star className="h-4 w-4" />
+                </div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Ratio de convivencia</p>
+              </div>
+              <p className="text-2xl font-extrabold">{positiveObservationsPercentage}%</p>
+            </div>
+
+            {/* Hover Explanatory Popup Tooltip */}
+            <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-3 w-64 -translate-x-1/2 rounded-xl bg-slate-950 p-3 text-[11px] text-slate-100 shadow-xl opacity-0 transition-all duration-200 scale-95 origin-bottom group-hover:opacity-100 group-hover:scale-100 select-none">
+              <p className="font-bold text-white mb-1">¿Cómo se calcula este ratio?</p>
+              <p className="text-slate-350 leading-relaxed">
+                Representa el porcentaje de anotaciones positivas sobre el total combinado de anotaciones positivas y negativas (excluyendo entrevistas u otros registros).
+              </p>
+              <div className="absolute top-full left-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1 rotate-45 bg-slate-950" />
+            </div>
           </article>
         </section>
 
@@ -1303,64 +1370,205 @@ export default function Home() {
         </section>
 
         <section className="grid gap-4 lg:grid-cols-2">
-          <article className="h-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 font-semibold">Top 5 estudiantes con más positivas</h2>
-            <ResponsiveContainer width="100%" height="90%">
-              <BarChart data={topPositive} layout="vertical" margin={{ left: 30 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="estudiante" width={160} />
-                <Tooltip />
-                <Bar dataKey="totalObservaciones" fill="#10b981" radius={[0, 8, 8, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          {/* Tarjeta 1: Estudiantes con más positivas */}
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              Top 5 estudiantes con más positivas
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                    <th className="px-4 py-3 text-center w-16">Puesto</th>
+                    <th className="px-4 py-3">Estudiante</th>
+                    <th className="px-4 py-3 text-center w-28">Anotaciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 5 }).map((_, index) => {
+                    const pos = topPositive[index];
+                    const rank = index + 1;
+
+                    let rankClass = "text-slate-500 bg-slate-50";
+                    if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
+                    else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
+                    else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+
+                    return (
+                      <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                        <td className="px-4 py-3.5 text-center">
+                          <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
+                            {rank}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 font-medium text-slate-800">
+                          {pos ? pos.estudiante : <span className="text-slate-400 font-normal">-</span>}
+                        </td>
+                        <td className="px-4 py-3.5 text-center">
+                          {pos ? (
+                            <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                              {pos.totalObservaciones}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </article>
 
-          <article className="h-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 font-semibold">Top 5 estudiantes con más negativas</h2>
-            <ResponsiveContainer width="100%" height="90%">
-              <BarChart data={topNegative} layout="vertical" margin={{ left: 30 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis type="number" allowDecimals={false} />
-                <YAxis type="category" dataKey="estudiante" width={160} />
-                <Tooltip />
-                <Bar dataKey="totalObservaciones" fill="#ef4444" radius={[0, 8, 8, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+          {/* Tarjeta 2: Estudiantes con más negativas */}
+          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-rose-500" />
+              Top 5 estudiantes con más negativas
+            </h2>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                    <th className="px-4 py-3 text-center w-16">Puesto</th>
+                    <th className="px-4 py-3">Estudiante</th>
+                    <th className="px-4 py-3 text-center w-28">Anotaciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 5 }).map((_, index) => {
+                    const neg = topNegative[index];
+                    const rank = index + 1;
+
+                    let rankClass = "text-slate-500 bg-slate-50";
+                    if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
+                    else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
+                    else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+
+                    return (
+                      <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                        <td className="px-4 py-3.5 text-center">
+                          <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
+                            {rank}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3.5 font-medium text-slate-800">
+                          {neg ? neg.estudiante : <span className="text-slate-400 font-normal">-</span>}
+                        </td>
+                        <td className="px-4 py-3.5 text-center">
+                          {neg ? (
+                            <span className="inline-block rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">
+                              {neg.totalObservaciones}
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </article>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="relative w-full lg:max-w-sm">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Buscar estudiante..."
-                className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm outline-none ring-indigo-500 transition focus:ring"
-              />
+          <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <Filter className="h-4 w-4 text-indigo-500" />
+                Panel de Filtros Rápidos
+              </h3>
+              {(selectedAsignaturaObs !== "all" || selectedCursoObs !== "all" || selectedFechaObs !== "all" || searchQuery !== "" || quickFilter !== "all") && (
+                <button
+                  onClick={() => {
+                    setSelectedAsignaturaObs("all");
+                    setSelectedCursoObs("all");
+                    setSelectedFechaObs("all");
+                    setSearchQuery("");
+                    setQuickFilter("all");
+                  }}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
+                >
+                  Restablecer todos los filtros
+                </button>
+              )}
             </div>
 
-            <div className="flex items-center gap-2 text-sm">
-              <Filter className="h-4 w-4 text-slate-500" />
-              {([
-                { value: "all", label: "Ver todo" },
-                { value: "positiva", label: "Solo positivas" },
-                { value: "negativa", label: "Solo negativas" },
-              ] as const).map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setQuickFilter(option.value)}
-                  className={`rounded-xl px-3 py-2 transition ${quickFilter === option.value
-                    ? "bg-indigo-600 text-white"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {/* 1. Búsqueda de texto */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                  Buscar
+                </label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Estudiante..."
+                    className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs outline-none ring-indigo-500 transition focus:ring"
+                  />
+                </div>
+              </div>
+
+              {/* 2. Filtro de Tipo */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                  Tipo
+                </label>
+                <select
+                  value={quickFilter}
+                  onChange={(e) => setQuickFilter(e.target.value as any)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
                 >
-                  {option.label}
-                </button>
-              ))}
+                  <option value="all">Ver todo</option>
+                  <option value="positiva">Solo positivas</option>
+                  <option value="negativa">Solo negativas</option>
+                  <option value="otros">Otros / Entrevistas</option>
+                </select>
+              </div>
+
+              {/* 3. Filtro de Asignatura */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                  Gravedad
+                </label>
+                <select
+                  value={selectedAsignaturaObs}
+                  onChange={(e) => setSelectedAsignaturaObs(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
+                >
+                  <option value="all">Todas</option>
+                  {uniqueAsignaturasObs.map((asig) => (
+                    <option key={asig} value={asig}>
+                      {asig}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 5. Filtro de Fecha */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                  Fecha
+                </label>
+                <select
+                  value={selectedFechaObs}
+                  onChange={(e) => setSelectedFechaObs(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
+                >
+                  <option value="all">Todas</option>
+                  {uniqueFechasObs.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
