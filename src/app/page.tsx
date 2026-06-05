@@ -10,10 +10,10 @@ import {
   Star,
   Upload,
   Users,
+  Info,
+  BookOpen,
 } from "lucide-react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -28,7 +28,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ChangeEvent, DragEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useMemo, useState, useCallback } from "react";
 
 type ObservationKind = "positiva" | "negativa" | "otros";
 type QuickFilter = "all" | ObservationKind;
@@ -60,6 +60,50 @@ type PendienteItem = {
   estadoRegistro?: string;
   checked: boolean;
 };
+
+type GradeItem = {
+  label: string;
+  weight: string;
+  value: number | null;
+};
+
+type CalificacionSubjectData = {
+  subjectName: string;
+  grades: GradeItem[];
+  p1: number | null;
+  p2: number | null;
+  pf: number | null;
+};
+
+type CalificacionStudent = {
+  id: string;
+  lista: string;
+  estudiante: string;
+  run: string;
+  dv: string;
+  periodo1: number | null;
+  periodo2: number | null;
+  promedioGeneral: number | null;
+  subjects: CalificacionSubjectData[];
+};
+
+interface ExcelSectionValue {
+  subjectName?: string;
+  type: "grade" | "p1" | "p2" | "pf" | "p1_gen" | "p2_gen" | "pf_gen";
+  label?: string;
+  value: number | string | null;
+}
+
+interface ExcelSectionRow {
+  label: string;
+  values: ExcelSectionValue[];
+}
+
+interface ExcelExtraData {
+  indicadores: ExcelSectionRow[];
+  categorias: ExcelSectionRow[];
+  leyendas: string[];
+}
 
 const REQUIRED_HEADERS = [
   "Curso",
@@ -211,7 +255,7 @@ export default function Home() {
   const [timeResolution, setTimeResolution] = useState<"daily" | "monthly">("daily");
 
 
-  const [appMode, setAppMode] = useState<"observations" | "pendientes">("observations");
+  const [appMode, setAppMode] = useState<"observations" | "pendientes" | "calificaciones">("observations");
   const [pendientes, setPendientes] = useState<PendienteItem[]>([]);
   const [pendientesSearch, setPendientesSearch] = useState("");
   const [pendientesFilter, setPendientesFilter] = useState<"all" | "firma" | "leccionario">("all");
@@ -222,20 +266,258 @@ export default function Home() {
   const [selectedCursoObs, setSelectedCursoObs] = useState<string>("all");
   const [selectedFechaObs, setSelectedFechaObs] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(false);
+  const [uploadedFilesCount, setUploadedFilesCount] = useState<number>(0);
+  const [activeCourseTab, setActiveCourseTab] = useState<string>("all");
+
+  const [calificaciones, setCalificaciones] = useState<CalificacionStudent[]>([]);
+  const [selectedCalificacionesAsignatura, setSelectedCalificacionesAsignatura] = useState<string>("all");
+  const [onlyShowAtRiskCalificaciones, setOnlyShowAtRiskCalificaciones] = useState<boolean>(false);
+  const [calificacionesSearch, setCalificacionesSearch] = useState<string>("");
+  const [excelExtraData, setExcelExtraData] = useState<ExcelExtraData | null>(null);
+
+  const resetAll = () => {
+    setObservations([]);
+    setPendientes([]);
+    setCalificaciones([]);
+    setErrorMessage("");
+    setSelectedAsignatura("all");
+    setSelectedCurso("all");
+    setSelectedFecha("all");
+    setPendientesSearch("");
+    setPendientesFilter("all");
+    setSelectedAsignaturaObs("all");
+    setSelectedCursoObs("all");
+    setSelectedFechaObs("all");
+    setSearchQuery("");
+    setQuickFilter("all");
+    setUploadedFilesCount(0);
+    setActiveCourseTab("all");
+    setSelectedCalificacionesAsignatura("all");
+    setOnlyShowAtRiskCalificaciones(false);
+    setCalificacionesSearch("");
+    setExcelExtraData(null);
+  };
+
+  const promedioGeneralCurso = useMemo(() => {
+    const validGrades = calificaciones.map(c => c.promedioGeneral).filter((g): g is number => g !== null && g > 0);
+    if (validGrades.length === 0) return 0;
+    const sum = validGrades.reduce((a, b) => a + b, 0);
+    return parseFloat((sum / validGrades.length).toFixed(2));
+  }, [calificaciones]);
+
+  const tasaAprobacion = useMemo(() => {
+    const validGrades = calificaciones.map(c => c.promedioGeneral).filter((g): g is number => g !== null && g > 0);
+    if (validGrades.length === 0) return 0;
+    const passing = validGrades.filter(g => g >= 4.0).length;
+    return Math.round((passing / validGrades.length) * 100);
+  }, [calificaciones]);
+
+  const uniqueAsignaturasCalificaciones = useMemo(() => {
+    const subjectsSet = new Set<string>();
+    for (const student of calificaciones) {
+      for (const sub of student.subjects) {
+        if (sub.subjectName) {
+          subjectsSet.add(sub.subjectName);
+        }
+      }
+    }
+    return Array.from(subjectsSet).sort();
+  }, [calificaciones]);
+
+  const distributionData = useMemo(() => {
+    let reprobados = 0;
+    let suficiente = 0;
+    let bueno = 0;
+    let excelente = 0;
+
+    for (const c of calificaciones) {
+      const avg = c.promedioGeneral;
+      if (avg === null || avg === 0) continue;
+      if (avg < 4.0) reprobados++;
+      else if (avg < 5.0) suficiente++;
+      else if (avg < 6.0) bueno++;
+      else excelente++;
+    }
+
+    return [
+      { name: "Reprobado (1.0-3.9)", value: reprobados, color: "#ef4444" },
+      { name: "Suficiente (4.0-4.9)", value: suficiente, color: "#f59e0b" },
+      { name: "Bueno (5.0-5.9)", value: bueno, color: "#3b82f6" },
+      { name: "Excelente (6.0-7.0)", value: excelente, color: "#10b981" },
+    ].filter(item => item.value > 0);
+  }, [calificaciones]);
+
+  const subjectPerformanceData = useMemo(() => {
+    const map = new Map<string, { sum: number; count: number }>();
+
+    for (const student of calificaciones) {
+      for (const sub of student.subjects) {
+        if (sub.pf !== null && sub.pf > 0) {
+          const existing = map.get(sub.subjectName) || { sum: 0, count: 0 };
+          map.set(sub.subjectName, {
+            sum: existing.sum + sub.pf,
+            count: existing.count + 1,
+          });
+        }
+      }
+    }
+
+    return Array.from(map.entries()).map(([name, stats]) => ({
+      name,
+      promedio: parseFloat((stats.sum / stats.count).toFixed(2)),
+    })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [calificaciones]);
+
+  const filteredCalificaciones = useMemo(() => {
+    const term = calificacionesSearch.trim().toLowerCase();
+
+    return calificaciones.filter(student => {
+      const matchesSearch = !term || student.estudiante.toLowerCase().includes(term);
+
+      let matchesSubject = true;
+      if (selectedCalificacionesAsignatura !== "all") {
+        const sub = student.subjects.find(s => s.subjectName === selectedCalificacionesAsignatura);
+        matchesSubject = !!sub;
+      }
+
+      let matchesAtRisk = true;
+      if (onlyShowAtRiskCalificaciones) {
+        if (selectedCalificacionesAsignatura === "all") {
+          matchesAtRisk = student.promedioGeneral !== null && student.promedioGeneral < 4.0;
+        } else {
+          const sub = student.subjects.find(s => s.subjectName === selectedCalificacionesAsignatura);
+          matchesAtRisk = sub ? (sub.pf !== null && sub.pf < 4.0) : false;
+        }
+      }
+
+      return matchesSearch && matchesSubject && matchesAtRisk;
+    });
+  }, [calificaciones, calificacionesSearch, selectedCalificacionesAsignatura, onlyShowAtRiskCalificaciones]);
+
+  const subjectColumnStats = useMemo(() => {
+    let columns: { label: string, type: "grade" | "p1" | "p2" | "pf" | "p1_gen" | "p2_gen" | "pf_gen" }[] = [];
+
+    if (selectedCalificacionesAsignatura !== "all") {
+      const selectedSubObj = calificaciones.find(s => s.subjects.some(sub => sub.subjectName === selectedCalificacionesAsignatura))
+        ?.subjects.find(sub => sub.subjectName === selectedCalificacionesAsignatura);
+      if (!selectedSubObj) return null;
+
+      columns = [
+        ...selectedSubObj.grades.map(g => ({ label: g.label, type: "grade" as const })),
+        { label: "P1", type: "p1" as const },
+        { label: "P2", type: "p2" as const },
+        { label: "PF", type: "pf" as const },
+      ];
+    } else {
+      columns = [
+        { label: "P1 General", type: "p1_gen" as const },
+        { label: "P2 General", type: "p2_gen" as const },
+        { label: "Promedio General", type: "pf_gen" as const },
+      ];
+    }
+
+    const result: Record<string, { promedio: number | null, minimo: number | null, maximo: number | null, desviacion: number | null }> = {};
+
+    for (const col of columns) {
+      const grades: number[] = [];
+      for (const student of filteredCalificaciones) {
+        let val: number | null = null;
+
+        if (selectedCalificacionesAsignatura !== "all") {
+          const studentSub = student.subjects.find(s => s.subjectName === selectedCalificacionesAsignatura);
+          if (studentSub) {
+            if (col.type === "grade") {
+              val = studentSub.grades.find(g => g.label === col.label)?.value ?? null;
+            } else if (col.type === "p1") {
+              val = studentSub.p1;
+            } else if (col.type === "p2") {
+              val = studentSub.p2;
+            } else if (col.type === "pf") {
+              val = studentSub.pf;
+            }
+          }
+        } else {
+          if (col.type === "p1_gen") {
+            val = student.periodo1;
+          } else if (col.type === "p2_gen") {
+            val = student.periodo2;
+          } else if (col.type === "pf_gen") {
+            val = student.promedioGeneral;
+          }
+        }
+
+        if (val !== null && val > 0) {
+          grades.push(val);
+        }
+      }
+
+      if (grades.length > 0) {
+        const sum = grades.reduce((a, b) => a + b, 0);
+        const avg = sum / grades.length;
+        const min = Math.min(...grades);
+        const max = Math.max(...grades);
+
+        const variance = grades.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / grades.length;
+        const stdDev = Math.sqrt(variance);
+
+        result[col.label] = {
+          promedio: parseFloat(avg.toFixed(2)),
+          minimo: min,
+          maximo: max,
+          desviacion: parseFloat(stdDev.toFixed(2)),
+        };
+      } else {
+        result[col.label] = { promedio: null, minimo: null, maximo: null, desviacion: null };
+      }
+    }
+
+    return result;
+  }, [filteredCalificaciones, selectedCalificacionesAsignatura, calificaciones]);
 
 
 
-  const total = observations.length;
+  const getExcelCategoryVal = useCallback((
+    rowLabel: string,
+    type: ExcelSectionValue["type"],
+    subjectName?: string,
+    gradeLabel?: string
+  ): number | string | null => {
+    if (!excelExtraData) return null;
+    const cleanLabel = rowLabel.trim().toLowerCase();
+    const row = excelExtraData.categorias.find(r => {
+      const l = r.label.trim().toLowerCase();
+      return l.includes(cleanLabel) || cleanLabel.includes(l);
+    });
+    if (!row) return null;
+
+    const match = row.values.find(v => {
+      if (type === "grade") {
+        return v.type === "grade" && v.subjectName === subjectName && v.label === gradeLabel;
+      }
+      if (subjectName) {
+        return v.type === type && v.subjectName === subjectName;
+      }
+      return v.type === type;
+    });
+    return match ? match.value : null;
+  }, [excelExtraData]);
+
+  const displayObservations = useMemo(() => {
+    if (activeCourseTab === "all") return observations;
+    return observations.filter((o) => o.curso === activeCourseTab);
+  }, [observations, activeCourseTab]);
+
+  const total = displayObservations.length;
 
   const summary = useMemo(() => {
     const result = { positivas: 0, negativas: 0, otros: 0 };
-    for (const row of observations) {
+    for (const row of displayObservations) {
       if (row.tipo === "positiva") result.positivas += 1;
       if (row.tipo === "negativa") result.negativas += 1;
       if (row.tipo === "otros") result.otros += 1;
     }
     return result;
-  }, [observations]);
+  }, [displayObservations]);
 
   const positiveObservationsPercentage =
     (summary.positivas + summary.negativas) > 0
@@ -248,7 +530,7 @@ export default function Home() {
     let entrevistas = 0;
     let otros = 0;
 
-    for (const row of observations) {
+    for (const row of displayObservations) {
       if (row.tipo === "positiva") {
         positivas += 1;
       } else if (row.tipo === "negativa") {
@@ -269,12 +551,12 @@ export default function Home() {
       { name: "Entrevistas", value: entrevistas },
       { name: "Otros", value: otros },
     ].filter((item) => item.value > 0);
-  }, [observations]);
+  }, [displayObservations]);
 
   const trendData = useMemo(() => {
     const map = new Map<string, { fecha: string; positivas: number; negativas: number }>();
 
-    for (const item of observations) {
+    for (const item of displayObservations) {
       if (!item.fechaOrdenable) continue;
       if (!map.has(item.fechaOrdenable)) {
         map.set(item.fechaOrdenable, {
@@ -303,12 +585,12 @@ export default function Home() {
       tendenciaPositiva: posTrend[index] ?? 0,
       tendenciaNegativa: negTrend[index] ?? 0,
     }));
-  }, [observations]);
+  }, [displayObservations]);
 
   const monthlyData = useMemo(() => {
     const map = new Map<string, { mes: string; positivas: number; negativas: number }>();
 
-    for (const item of observations) {
+    for (const item of displayObservations) {
       if (!item.fechaOrdenable) continue;
       const mesKey = item.fechaOrdenable.substring(0, 7);
       if (!map.has(mesKey)) {
@@ -339,13 +621,13 @@ export default function Home() {
       tendenciaPositiva: posTrend[index] ?? 0,
       tendenciaNegativa: negTrend[index] ?? 0,
     }));
-  }, [observations]);
+  }, [displayObservations]);
 
   const { topPositive, topNegative } = useMemo(() => {
     const positives = new Map<string, number>();
     const negatives = new Map<string, number>();
 
-    for (const item of observations) {
+    for (const item of displayObservations) {
       if (item.tipo === "positiva") {
         positives.set(item.nombreCompleto, (positives.get(item.nombreCompleto) ?? 0) + 1);
       }
@@ -361,13 +643,13 @@ export default function Home() {
         .slice(0, 5);
 
     return { topPositive: toTop(positives), topNegative: toTop(negatives) };
-  }, [observations]);
+  }, [displayObservations]);
 
   const { topPositiveFuncionarios, topNegativeFuncionarios } = useMemo(() => {
     const positives = new Map<string, number>();
     const negatives = new Map<string, number>();
 
-    for (const item of observations) {
+    for (const item of displayObservations) {
       const func = item.funcionario || "No especificado";
       if (item.tipo === "positiva") {
         positives.set(func, (positives.get(func) ?? 0) + 1);
@@ -387,13 +669,13 @@ export default function Home() {
       topPositiveFuncionarios: toTop(positives),
       topNegativeFuncionarios: toTop(negatives),
     };
-  }, [observations]);
+  }, [displayObservations]);
 
   const faltasStats = useMemo(() => {
     const counts = new Map<string, number>();
     let totalValidos = 0;
 
-    for (const item of observations) {
+    for (const item of displayObservations) {
       if (!item.falta) continue;
       const f = item.falta.trim();
       if (!f) continue;
@@ -406,13 +688,13 @@ export default function Home() {
       .sort((a, b) => b.value - a.value);
 
     return { data, totalValidos };
-  }, [observations]);
+  }, [displayObservations]);
 
   const { latestPositive, latestNegative } = useMemo(() => {
     let latestPos: Observation | null = null;
     let latestNeg: Observation | null = null;
 
-    const sorted = [...observations]
+    const sorted = [...displayObservations]
       .filter((obs) => obs.fechaOrdenable)
       .sort((a, b) => b.fechaOrdenable.localeCompare(a.fechaOrdenable));
 
@@ -427,19 +709,19 @@ export default function Home() {
     }
 
     if (!latestPos) {
-      latestPos = observations.find((obs) => obs.tipo === "positiva") ?? null;
+      latestPos = displayObservations.find((obs) => obs.tipo === "positiva") ?? null;
     }
     if (!latestNeg) {
-      latestNeg = observations.find((obs) => obs.tipo === "negativa") ?? null;
+      latestNeg = displayObservations.find((obs) => obs.tipo === "negativa") ?? null;
     }
 
     return { latestPositive: latestPos, latestNegative: latestNeg };
-  }, [observations]);
+  }, [displayObservations]);
 
   const filteredRows = useMemo(() => {
     const term = searchQuery.trim().toLowerCase();
 
-    return observations.filter((item) => {
+    return displayObservations.filter((item) => {
       const matchesSearch = !term || item.nombreCompleto.toLowerCase().includes(term);
       const matchesType = quickFilter === "all" || item.tipo === quickFilter;
       const matchesAsignatura = selectedAsignaturaObs === "all" || item.asignaturaOrCategorizacion === selectedAsignaturaObs;
@@ -447,7 +729,7 @@ export default function Home() {
       const matchesFecha = selectedFechaObs === "all" || item.fechaTexto === selectedFechaObs;
       return matchesSearch && matchesType && matchesAsignatura && matchesCurso && matchesFecha;
     });
-  }, [observations, quickFilter, searchQuery, selectedAsignaturaObs, selectedCursoObs, selectedFechaObs]);
+  }, [displayObservations, quickFilter, searchQuery, selectedAsignaturaObs, selectedCursoObs, selectedFechaObs]);
 
 
 
@@ -470,7 +752,7 @@ export default function Home() {
 
   const uniqueAsignaturasObs = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const o of observations) {
+    for (const o of displayObservations) {
       if (o.asignaturaOrCategorizacion) {
         counts.set(o.asignaturaOrCategorizacion, (counts.get(o.asignaturaOrCategorizacion) ?? 0) + 1);
       }
@@ -478,20 +760,20 @@ export default function Home() {
     return [...counts.entries()]
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [observations]);
+  }, [displayObservations]);
 
   const uniqueCursosObs = useMemo(() => {
     return Array.from(new Set(observations.map((o) => o.curso).filter(Boolean))).sort();
   }, [observations]);
 
   const uniqueFechasObs = useMemo(() => {
-    const rawFechas = Array.from(new Set(observations.map((o) => o.fechaTexto).filter(Boolean)));
+    const rawFechas = Array.from(new Set(displayObservations.map((o) => o.fechaTexto).filter(Boolean)));
     return rawFechas.sort((a, b) => {
       const dateA = parseDateToSortable(a);
       const dateB = parseDateToSortable(b);
       return dateA.localeCompare(dateB);
     });
-  }, [observations]);
+  }, [displayObservations]);
 
   const sortedPendientes = useMemo(() => {
     const term = pendientesSearch.toLowerCase().trim();
@@ -532,11 +814,13 @@ export default function Home() {
     );
   };
 
-  const processSingleFile = (file: File): Promise<{
+  const processSingleFile = useCallback((file: File): Promise<{
     fileName: string;
-    type: "observations" | "pendientes";
+    type: "observations" | "pendientes" | "calificaciones";
     observationsData?: Observation[];
     pendientesData?: PendienteItem[];
+    calificacionesData?: CalificacionStudent[];
+    excelExtraData?: ExcelExtraData;
     error?: string;
   }> => {
     return new Promise((resolve) => {
@@ -608,6 +892,26 @@ export default function Home() {
 
             const firstSheetName = workbook.SheetNames[0];
             let isPendientes = false;
+            let isCalificaciones = false;
+            let jsonGrid: unknown[][] = [];
+
+            if (firstSheetName) {
+              const worksheet = workbook.Sheets[firstSheetName];
+              jsonGrid = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1, defval: "" });
+
+              if (jsonGrid.length >= 3) {
+                const row1 = jsonGrid[0].map((h: unknown) => String(h || "").trim().toLowerCase());
+                const row2 = jsonGrid[1].map((h: unknown) => String(h || "").trim().toLowerCase());
+
+                const hasEstudiante = row1.some(h => h.includes("estudiante") || h.includes("alumno"));
+                const hasPromedio = row1.some(h => h.includes("promedio general") || h.includes("promediogeneral"));
+                const hasN1 = row2.some(h => h === "n1" || h === "n2" || h === "n°1");
+
+                if (hasEstudiante && (hasPromedio || hasN1)) {
+                  isCalificaciones = true;
+                }
+              }
+            }
 
             const hasPendientesSheetNames = workbook.SheetNames.some(
               (name) =>
@@ -616,16 +920,288 @@ export default function Home() {
                 name.toLowerCase().includes("registro")
             );
 
-            if (hasPendientesSheetNames) {
-              isPendientes = true;
-            } else if (firstSheetName) {
-              const worksheet = workbook.Sheets[firstSheetName];
-              const json = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { header: 1 });
-              const headers = (json[0] || []).map((h: any) => String(h).trim().toLowerCase());
-              isPendientes = headers.includes("docente titular") || headers.includes("docente") || headers.includes("estado de la firma") || headers.includes("hora de clase");
+            if (!isCalificaciones) {
+              if (hasPendientesSheetNames) {
+                isPendientes = true;
+              } else if (jsonGrid.length > 0) {
+                const headers = jsonGrid[0].map((h: unknown) => String(h || "").trim().toLowerCase());
+                isPendientes = headers.includes("docente titular") || headers.includes("docente") || headers.includes("estado de la firma") || headers.includes("hora de clase");
+              }
             }
 
-            if (isPendientes) {
+            if (isCalificaciones) {
+              const headersRow1 = jsonGrid[0] || [];
+              const headersRow2 = jsonGrid[1] || [];
+              const headersRow3 = jsonGrid[2] || [];
+
+              let colLista = -1;
+              let colEstudiante = -1;
+              let colRun = -1;
+              let colDv = -1;
+              let colP1 = -1;
+              let colP2 = -1;
+              let colPF = -1;
+
+              for (let c = 0; c < Math.min(15, headersRow1.length); c++) {
+                const h1 = String(headersRow1[c] || "").trim().toLowerCase();
+                if (h1.includes("lista") || h1.includes("nº") || h1.includes("n°")) {
+                  colLista = c;
+                } else if (h1.includes("estudiante") && !h1.includes("run")) {
+                  colEstudiante = c;
+                } else if (h1.includes("run")) {
+                  colRun = c;
+                } else if (h1.includes("digito") || h1.includes("dígito") || h1.includes("dv") || h1.includes("verific")) {
+                  colDv = c;
+                } else if (h1.includes("periodo 1") || h1.includes("periodo1")) {
+                  colP1 = c;
+                } else if (h1.includes("periodo 2") || h1.includes("periodo2")) {
+                  colP2 = c;
+                } else if (h1.includes("promedio general") || h1.includes("promediogeneral")) {
+                  colPF = c;
+                }
+              }
+
+              for (let c = 0; c < Math.min(15, headersRow2.length); c++) {
+                const h2 = String(headersRow2[c] || "").trim().toLowerCase();
+                if (h2 === "p1" && colP1 === -1 && c !== colLista && c !== colEstudiante && c !== colRun && c !== colDv) {
+                  colP1 = c;
+                } else if (h2 === "p2" && colP2 === -1 && c !== colLista && c !== colEstudiante && c !== colRun && c !== colDv) {
+                  colP2 = c;
+                } else if (h2 === "pf" && colPF === -1 && c !== colLista && c !== colEstudiante && c !== colRun && c !== colDv) {
+                  colPF = c;
+                }
+              }
+
+              interface SubjectColumnInfo {
+                subjectName: string;
+                colIndex: number;
+                type: "grade" | "p1" | "p2" | "pf";
+                gradeLabel?: string;
+                weight?: string;
+              }
+
+              const subjectCols: SubjectColumnInfo[] = [];
+              let currentSubject = "";
+
+              for (let c = 0; c < headersRow1.length; c++) {
+                if (c === colLista || c === colEstudiante || c === colRun || c === colDv || c === colP1 || c === colP2 || c === colPF) {
+                  continue;
+                }
+
+                const h1Val = String(headersRow1[c] || "").trim();
+                if (h1Val) {
+                  currentSubject = h1Val;
+                }
+
+                if (!currentSubject) continue;
+
+                const h2Val = String(headersRow2[c] || "").trim();
+                const h3Val = String(headersRow3[c] || "").trim();
+
+                const h2Lower = h2Val.toLowerCase();
+                if (h2Lower === "p1") {
+                  subjectCols.push({ subjectName: currentSubject, colIndex: c, type: "p1" });
+                } else if (h2Lower === "p2") {
+                  subjectCols.push({ subjectName: currentSubject, colIndex: c, type: "p2" });
+                } else if (h2Lower === "pf") {
+                  subjectCols.push({ subjectName: currentSubject, colIndex: c, type: "pf" });
+                } else if (h2Val) {
+                  subjectCols.push({
+                    subjectName: currentSubject,
+                    colIndex: c,
+                    type: "grade",
+                    gradeLabel: h2Val,
+                    weight: h3Val,
+                  });
+                }
+              }
+
+              const studentRows: CalificacionStudent[] = [];
+              let breakIndex = jsonGrid.length;
+
+              for (let r = 3; r < jsonGrid.length; r++) {
+                const row = jsonGrid[r];
+                if (!row || row.length === 0) continue;
+
+                // Stop parsing when encountering indicators, categories, or legend sections
+                const valColA = String(row[0] || "").trim().toLowerCase();
+                const valColEstudiante = colEstudiante !== -1 ? String(row[colEstudiante] || "").trim().toLowerCase() : "";
+                if (
+                  valColA.startsWith("indicador") || valColEstudiante.startsWith("indicador") ||
+                  valColA.startsWith("categor") || valColEstudiante.startsWith("categor") ||
+                  valColA.startsWith("leyenda") || valColEstudiante.startsWith("leyenda")
+                ) {
+                  breakIndex = r;
+                  break;
+                }
+
+                const studentName = colEstudiante !== -1 ? String(row[colEstudiante] || "").trim() : "";
+                if (!studentName) continue;
+
+                const listNum = colLista !== -1 ? String(row[colLista] || "").trim() : String(r - 2);
+                const run = colRun !== -1 ? String(row[colRun] || "").trim() : "";
+                const dv = colDv !== -1 ? String(row[colDv] || "").trim() : "";
+
+                const parseGrade = (val: unknown): number | null => {
+                  if (val === undefined || val === null || String(val).trim() === "" || String(val).trim() === "-") {
+                    return null;
+                  }
+                  const str = String(val).trim().replace(",", ".");
+                  const num = parseFloat(str);
+                  return isNaN(num) ? null : num;
+                };
+
+                const p1General = colP1 !== -1 ? parseGrade(row[colP1]) : null;
+                const p2General = colP2 !== -1 ? parseGrade(row[colP2]) : null;
+                const pfGeneral = colPF !== -1 ? parseGrade(row[colPF]) : null;
+
+                const subjectsMap: Record<string, CalificacionSubjectData> = {};
+
+                for (const sCol of subjectCols) {
+                  const subName = sCol.subjectName;
+                  if (!subjectsMap[subName]) {
+                    subjectsMap[subName] = {
+                      subjectName: subName,
+                      grades: [],
+                      p1: null,
+                      p2: null,
+                      pf: null,
+                    };
+                  }
+
+                  const val = row[sCol.colIndex];
+                  const gradeVal = parseGrade(val);
+
+                  if (sCol.type === "grade") {
+                    subjectsMap[subName].grades.push({
+                      label: sCol.gradeLabel || "",
+                      weight: sCol.weight || "",
+                      value: gradeVal,
+                    });
+                  } else if (sCol.type === "p1") {
+                    subjectsMap[subName].p1 = gradeVal;
+                  } else if (sCol.type === "p2") {
+                    subjectsMap[subName].p2 = gradeVal;
+                  } else if (sCol.type === "pf") {
+                    subjectsMap[subName].pf = gradeVal;
+                  }
+                }
+
+                studentRows.push({
+                  id: `calificacion-${file.name}-${studentName}-${r}`,
+                  lista: listNum,
+                  estudiante: capitalizeProperName(studentName),
+                  run,
+                  dv,
+                  periodo1: p1General,
+                  periodo2: p2General,
+                  promedioGeneral: pfGeneral,
+                  subjects: Object.values(subjectsMap),
+                });
+              }
+
+              // Parse extra indicators, categories, and legends
+              const excelExtra: ExcelExtraData = {
+                indicadores: [],
+                categorias: [],
+                leyendas: [],
+              };
+
+              let currentSection: "indicadores" | "categorias" | "leyendas" | "" = "";
+
+              for (let idx = breakIndex; idx < jsonGrid.length; idx++) {
+                const row = jsonGrid[idx];
+                if (!row || row.length === 0) continue;
+
+                const valColA = String(row[0] || "").trim().toLowerCase();
+                const valColEstudiante = colEstudiante !== -1 ? String(row[colEstudiante] || "").trim().toLowerCase() : "";
+
+                if (valColA.startsWith("indicador") || valColEstudiante.startsWith("indicador")) {
+                  currentSection = "indicadores";
+                } else if (valColA.startsWith("categor") || valColEstudiante.startsWith("categor")) {
+                  currentSection = "categorias";
+                } else if (valColA.startsWith("leyenda") || valColEstudiante.startsWith("leyenda")) {
+                  currentSection = "leyendas";
+                }
+
+                const colLabelIndex = colEstudiante !== -1 ? colEstudiante : 1;
+                const label = String(row[colLabelIndex] || row[1] || row[0] || "").trim();
+
+                if (currentSection === "indicadores" || currentSection === "categorias") {
+                  if (!label || label.toLowerCase().startsWith("indicador") || label.toLowerCase().startsWith("categor")) {
+                    continue;
+                  }
+
+                  const values: ExcelSectionValue[] = [];
+
+                  if (colP1 !== -1 && row[colP1] !== undefined) {
+                    const v = row[colP1];
+                    const numVal = parseFloat(String(v || "").trim().replace(",", "."));
+                    values.push({
+                      type: "p1_gen",
+                      value: isNaN(numVal) ? String(v || "").trim() : numVal,
+                    });
+                  }
+                  if (colP2 !== -1 && row[colP2] !== undefined) {
+                    const v = row[colP2];
+                    const numVal = parseFloat(String(v || "").trim().replace(",", "."));
+                    values.push({
+                      type: "p2_gen",
+                      value: isNaN(numVal) ? String(v || "").trim() : numVal,
+                    });
+                  }
+                  if (colPF !== -1 && row[colPF] !== undefined) {
+                    const v = row[colPF];
+                    const numVal = parseFloat(String(v || "").trim().replace(",", "."));
+                    values.push({
+                      type: "pf_gen",
+                      value: isNaN(numVal) ? String(v || "").trim() : numVal,
+                    });
+                  }
+
+                  for (const sCol of subjectCols) {
+                    const v = row[sCol.colIndex];
+                    if (v !== undefined) {
+                      const strVal = String(v || "").trim();
+                      const numVal = parseFloat(strVal.replace(",", "."));
+                      const finalVal = isNaN(numVal) ? strVal : numVal;
+
+                      if (sCol.type === "grade") {
+                        values.push({
+                          subjectName: sCol.subjectName,
+                          type: "grade",
+                          label: sCol.gradeLabel,
+                          value: finalVal,
+                        });
+                      } else {
+                        values.push({
+                          subjectName: sCol.subjectName,
+                          type: sCol.type,
+                          value: finalVal,
+                        });
+                      }
+                    }
+                  }
+
+                  if (currentSection === "indicadores") {
+                    excelExtra.indicadores.push({ label, values });
+                  } else {
+                    excelExtra.categorias.push({ label, values });
+                  }
+                } else if (currentSection === "leyendas") {
+                  const text = String(row[1] || row[0] || "").trim();
+                  if (text && text.toLowerCase() !== "leyenda" && !text.toLowerCase().startsWith("leyenda")) {
+                    excelExtra.leyendas.push(text);
+                  }
+                }
+              }
+
+              if (studentRows.length === 0) {
+                resolve({ fileName: file.name, type: "calificaciones", error: "No se encontraron estudiantes o calificaciones en el archivo." });
+              } else {
+                resolve({ fileName: file.name, type: "calificaciones", calificacionesData: studentRows, excelExtraData: excelExtra });
+              }
+            } else if (isPendientes) {
               const items: PendienteItem[] = [];
 
               const sheet1Name = workbook.SheetNames.find((name) =>
@@ -634,7 +1210,7 @@ export default function Home() {
 
               if (sheet1Name) {
                 const sheet1 = workbook.Sheets[sheet1Name];
-                const data1 = XLSX.utils.sheet_to_json<Record<string, any>>(sheet1, {
+                const data1 = XLSX.utils.sheet_to_json<Record<string, string>>(sheet1, {
                   defval: "",
                   raw: false,
                 });
@@ -668,7 +1244,7 @@ export default function Home() {
 
               if (sheet2Name) {
                 const sheet2 = workbook.Sheets[sheet2Name];
-                const data2 = XLSX.utils.sheet_to_json<Record<string, any>>(sheet2, {
+                const data2 = XLSX.utils.sheet_to_json<Record<string, string>>(sheet2, {
                   defval: "",
                   raw: false,
                 });
@@ -702,7 +1278,7 @@ export default function Home() {
               }
             } else {
               const worksheet = workbook.Sheets[firstSheetName];
-              const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, {
+              const jsonData = XLSX.utils.sheet_to_json<Record<string, string>>(worksheet, {
                 defval: "",
                 raw: false,
               });
@@ -767,8 +1343,9 @@ export default function Home() {
 
               resolve({ fileName: file.name, type: "observations", observationsData: parsed });
             }
-          } catch (error: any) {
-            resolve({ fileName: file.name, type: "observations", error: `No fue posible leer el archivo Excel: ${error.message}` });
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            resolve({ fileName: file.name, type: "observations", error: `No fue posible leer el archivo Excel: ${msg}` });
           }
         };
         reader.onerror = () => {
@@ -779,9 +1356,9 @@ export default function Home() {
         resolve({ fileName: file.name, type: "observations", error: "Por favor, sube un archivo CSV o Excel (.xlsx, .xls)." });
       }
     });
-  };
+  }, []);
 
-  const handleFiles = async (files: File[]) => {
+  const handleFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
     setErrorMessage("");
     setIsLoading(true);
@@ -798,7 +1375,7 @@ export default function Home() {
       const firstType = results[0].type;
       const allSameType = results.every((r) => r.type === firstType);
       if (!allSameType) {
-        setErrorMessage("Todos los archivos cargados al mismo tiempo deben ser del mismo tipo (todos de Firmas/Leccionarios o todos de Observaciones)");
+        setErrorMessage("Todos los archivos cargados al mismo tiempo deben ser del mismo tipo (Firmas/Leccionarios, Observaciones o Calificaciones)");
         return;
       }
 
@@ -809,8 +1386,43 @@ export default function Home() {
             mergedObs.push(...r.observationsData);
           }
         });
+        setUploadedFilesCount(files.length);
+        setActiveCourseTab("all");
         setAppMode("observations");
         setObservations(mergedObs);
+      } else if (firstType === "calificaciones") {
+        const mergedCalificaciones: CalificacionStudent[] = [];
+        const mergedExtraData: ExcelExtraData = { indicadores: [], categorias: [], leyendas: [] };
+        results.forEach((r) => {
+          if (r.calificacionesData) {
+            mergedCalificaciones.push(...r.calificacionesData);
+          }
+          if (r.excelExtraData) {
+            for (const item of r.excelExtraData.indicadores) {
+              const existing = mergedExtraData.indicadores.find((ind) => ind.label === item.label);
+              if (existing) {
+                existing.values.push(...item.values);
+              } else {
+                mergedExtraData.indicadores.push({ label: item.label, values: [...item.values] });
+              }
+            }
+            for (const item of r.excelExtraData.categorias) {
+              const existing = mergedExtraData.categorias.find((cat) => cat.label === item.label);
+              if (existing) {
+                existing.values.push(...item.values);
+              } else {
+                mergedExtraData.categorias.push({ label: item.label, values: [...item.values] });
+              }
+            }
+            mergedExtraData.leyendas.push(...r.excelExtraData.leyendas);
+          }
+        });
+
+        mergedExtraData.leyendas = Array.from(new Set(mergedExtraData.leyendas));
+
+        setAppMode("calificaciones");
+        setCalificaciones(mergedCalificaciones);
+        setExcelExtraData(mergedExtraData);
       } else {
         const mergedPendientes: PendienteItem[] = [];
         results.forEach((r) => {
@@ -821,12 +1433,13 @@ export default function Home() {
         setAppMode("pendientes");
         setPendientes(mergedPendientes);
       }
-    } catch (err: any) {
-      setErrorMessage(`Error procesando los archivos: ${err.message}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(`Error procesando los archivos: ${msg}`);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [processSingleFile]);
 
   useEffect(() => {
     const handleExtensionMessage = (event: MessageEvent) => {
@@ -857,8 +1470,9 @@ export default function Home() {
               });
               handleFiles([file]);
             }
-          } catch (err: any) {
-            setErrorMessage(`Error al procesar archivo de la extensión: ${err.message}`);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setErrorMessage(`Error al procesar archivo de la extensión: ${msg}`);
           } finally {
             setIsLoading(false);
           }
@@ -887,7 +1501,7 @@ export default function Home() {
     handleFiles(files);
   };
 
-  if (observations.length === 0 && pendientes.length === 0) {
+  if (observations.length === 0 && pendientes.length === 0 && calificaciones.length === 0) {
     return (
       <main className="flex-grow w-full bg-slate-100 px-4 py-10 text-slate-900 flex items-center justify-center">
         {isLoading && (
@@ -935,7 +1549,7 @@ export default function Home() {
             </div>
             <div>
               <p className="font-medium">Arrastra y suelta tu archivo aquí</p>
-              <p className="text-sm text-slate-500">Acepta CSV de observaciones y Excel (.xlsx, .xls) de pendientes</p>
+              <p className="text-sm text-slate-500">Acepta CSV de observaciones y Excel (.xlsx, .xls) de calificaciones o pendientes</p>
             </div>
             <input
               type="file"
@@ -984,21 +1598,7 @@ export default function Home() {
               </p>
             </div>
             <button
-              onClick={() => {
-                setObservations([]);
-                setPendientes([]);
-                setErrorMessage("");
-                setSelectedAsignatura("all");
-                setSelectedCurso("all");
-                setSelectedFecha("all");
-                setPendientesSearch("");
-                setPendientesFilter("all");
-                setSelectedAsignaturaObs("all");
-                setSelectedCursoObs("all");
-                setSelectedFechaObs("all");
-                setSearchQuery("");
-                setQuickFilter("all");
-              }}
+              onClick={resetAll}
               className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
             >
               Subir otro archivo
@@ -1096,7 +1696,7 @@ export default function Home() {
                   </label>
                   <select
                     value={pendientesFilter}
-                    onChange={(e) => setPendientesFilter(e.target.value as any)}
+                    onChange={(e) => setPendientesFilter(e.target.value as "all" | "firma" | "leccionario")}
                     className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
                   >
                     <option value="all">Todos</option>
@@ -1232,686 +1832,1628 @@ export default function Home() {
     );
   }
 
-  return (
-    <main className="flex-grow w-full bg-slate-100 px-4 py-8 text-slate-900">
-      {isLoading && (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
-          <div className="relative flex items-center justify-center h-20 w-20">
-            {/* Spinning outer gradient ring */}
-            <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-indigo-500 border-r-purple-500 animate-spin" />
-            {/* Secondary counter-spinning ring */}
-            <div className="absolute inset-1.5 rounded-full border-4 border-transparent border-b-blue-500 border-l-pink-500 animate-spin [animation-duration:1.5s]" />
-            {/* Inner glowing core */}
-            <div className="h-4 w-4 rounded-full bg-indigo-500 animate-ping" />
-          </div>
-          <p className="mt-6 text-[11px] font-extrabold uppercase tracking-widest text-slate-200 animate-pulse">
-            Cargando planilla automáticamente...
-          </p>
-        </div>
-      )}
-      <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold">Dashboard de Convivencia Escolar</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              Visualización y métricas de observaciones de convivencia escolar cargadas.
+  if (appMode === "calificaciones" && calificaciones.length > 0) {
+    const selectedSubObj = selectedCalificacionesAsignatura !== "all"
+      ? calificaciones.find(s => s.subjects.some(sub => sub.subjectName === selectedCalificacionesAsignatura))
+        ?.subjects.find(sub => sub.subjectName === selectedCalificacionesAsignatura)
+      : null;
+    const gradeHeaders = selectedSubObj ? selectedSubObj.grades : [];
+
+    return (
+      <main className="flex-grow w-full bg-slate-100 px-4 py-8 text-slate-900">
+        {isLoading && (
+          <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
+            <div className="relative flex items-center justify-center h-20 w-20">
+              <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-indigo-500 border-r-purple-500 animate-spin" />
+              <div className="absolute inset-1.5 rounded-full border-4 border-transparent border-b-blue-500 border-l-pink-500 animate-spin [animation-duration:1.5s]" />
+              <div className="h-4 w-4 rounded-full bg-indigo-500 animate-ping" />
+            </div>
+            <p className="mt-6 text-[11px] font-extrabold uppercase tracking-widest text-slate-200 animate-pulse">
+              Cargando planilla automáticamente...
             </p>
           </div>
-          <div className="flex items-center gap-3 print:hidden">
+        )}
+        <div className="mx-auto flex max-w-7xl flex-col gap-6">
+          <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold">Registro de Calificaciones y Rendimiento</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                Visualiza y analiza el rendimiento general, promedios, aprobaciones y calificaciones por asignatura. Todo de forma local.
+              </p>
+            </div>
             <button
-              onClick={() => {
-                setObservations([]);
-                setPendientes([]);
-                setErrorMessage("");
-                setSelectedAsignatura("all");
-                setSelectedCurso("all");
-                setSelectedFecha("all");
-                setPendientesSearch("");
-                setPendientesFilter("all");
-                setSelectedAsignaturaObs("all");
-                setSelectedCursoObs("all");
-                setSelectedFechaObs("all");
-                setSearchQuery("");
-                setQuickFilter("all");
-              }}
+              onClick={resetAll}
               className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
             >
               Subir otro archivo
             </button>
-            <button
-              onClick={() => window.print()}
-              className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition active:scale-95 shadow-sm whitespace-nowrap"
-            >
-              Exportar PDF
-            </button>
-          </div>
-        </header>
+          </header>
 
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {/* Observaciones procesadas */}
-          <article className="relative overflow-hidden rounded-xl bg-blue-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
-            <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
-            <div className="relative z-10 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="rounded-lg bg-white/10 p-1.5 text-white">
-                  <Users className="h-4 w-4" />
-                </div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">Observaciones procesadas</p>
+          {/* Métricas del Curso */}
+          <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <article className="relative overflow-hidden rounded-xl bg-indigo-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10">
+                <p className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Promedio General Curso</p>
+                <p className="text-3xl font-extrabold mt-1">{promedioGeneralCurso.toFixed(2)}</p>
               </div>
-              <p className="text-2xl font-extrabold">{total}</p>
-            </div>
-          </article>
+            </article>
 
-          {/* Anotaciones positivas */}
-          <article className="relative overflow-hidden rounded-xl bg-emerald-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
-            <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
-            <div className="relative z-10 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="rounded-lg bg-white/10 p-1.5 text-white">
-                  <CheckCircle2 className="h-4 w-4" />
-                </div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Anotaciones positivas</p>
+            <article className="relative overflow-hidden rounded-xl bg-emerald-605 px-4 py-4.5 text-white bg-emerald-600 shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10">
+                <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Tasa de Aprobación</p>
+                <p className="text-3xl font-extrabold mt-1">{tasaAprobacion}%</p>
               </div>
-              <p className="text-2xl font-extrabold">{summary.positivas}</p>
-            </div>
-          </article>
+            </article>
 
-          {/* Anotaciones negativas */}
-          <article className="relative overflow-hidden rounded-xl bg-rose-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
-            <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
-            <div className="relative z-10 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="rounded-lg bg-white/10 p-1.5 text-white">
-                  <AlertCircle className="h-4 w-4" />
-                </div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-rose-100">Anotaciones negativas</p>
+            <article className="relative overflow-hidden rounded-xl bg-blue-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10">
+                <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">Total Alumnos</p>
+                <p className="text-3xl font-extrabold mt-1">{calificaciones.length}</p>
               </div>
-              <p className="text-2xl font-extrabold">{summary.negativas}</p>
-            </div>
-          </article>
+            </article>
 
-          {/* Ratio de convivencia */}
-          <article className="group cursor-help relative overflow-visible rounded-xl bg-indigo-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
-            <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none rounded-xl" />
-            <div className="relative z-10 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="rounded-lg bg-white/10 p-1.5 text-white">
-                  <Star className="h-4 w-4" />
-                </div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Ratio de convivencia</p>
+            <article className="relative overflow-hidden rounded-xl bg-purple-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10">
+                <p className="text-xs font-semibold uppercase tracking-wider text-purple-100">Asignaturas Evaluadas</p>
+                <p className="text-3xl font-extrabold mt-1">{uniqueAsignaturasCalificaciones.length}</p>
               </div>
-              <p className="text-2xl font-extrabold">{positiveObservationsPercentage}%</p>
+            </article>
+          </section>
+
+          {/* Gráficos */}
+          <section className="grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="font-semibold text-slate-800 mb-4">Distribución de Promedios Generales</h3>
+              <div className="w-full flex items-center justify-center">
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={distributionData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                    <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
+                    <Tooltip cursor={{ fill: '#f8fafc' }} />
+                    <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                      {distributionData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
 
-            {/* Hover Explanatory Popup Tooltip */}
-            <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-3 w-64 -translate-x-1/2 rounded-xl bg-slate-950 p-3 text-[11px] text-slate-100 shadow-xl opacity-0 transition-all duration-200 scale-95 origin-bottom group-hover:opacity-100 group-hover:scale-100 select-none">
-              <p className="font-bold text-white mb-1">¿Cómo se calcula este ratio?</p>
-              <p className="text-slate-350 leading-relaxed">
-                Representa el porcentaje de anotaciones positivas sobre el total combinado de anotaciones positivas y negativas (excluyendo entrevistas u otros registros).
-              </p>
-              <div className="absolute top-full left-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1 rotate-45 bg-slate-950" />
-            </div>
-          </article>
-        </section>
-
-        <section className="grid gap-4 md:grid-cols-2">
-          <article className="rounded-2xl border-l-4 border-l-emerald-500 border-y border-r border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
-                  Última Anotación Positiva
-                </span>
-                {latestPositive && (
-                  <span className="text-xs text-slate-500">
-                    {latestPositive.fechaTexto}
-                  </span>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="font-semibold text-slate-800 mb-4">Rendimiento Promedio por Asignatura</h3>
+              <div className="w-full flex items-center justify-center">
+                {subjectPerformanceData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={subjectPerformanceData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                      <YAxis domain={[1.0, 7.0]} stroke="#64748b" fontSize={11} tickLine={false} />
+                      <Tooltip />
+                      <Bar dataKey="promedio" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-[240px] flex items-center justify-center text-slate-400 italic text-sm">
+                    No hay asignaturas con promedios válidos
+                  </div>
                 )}
               </div>
-              {latestPositive ? (
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800">
-                    {latestPositive.nombreCompleto}
-                  </h3>
-
-                  <p className="text-sm text-slate-600 italic line-clamp-3">
-                    "{latestPositive.descripcion}"
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-400 py-4 italic text-center">
-                  No se encontraron anotaciones positivas.
-                </p>
-              )}
             </div>
-          </article>
+          </section>
 
-          <article className="rounded-2xl border-l-4 border-l-rose-500 border-y border-r border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wider text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full">
-                  Última Anotación Negativa
-                </span>
-                {latestNegative && (
-                  <span className="text-xs text-slate-500">
-                    {latestNegative.fechaTexto}
-                  </span>
+          {/* Filtros e Historial */}
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-indigo-500" />
+                  Panel de Filtros de Calificaciones
+                </h3>
+                {(selectedCalificacionesAsignatura !== "all" || onlyShowAtRiskCalificaciones || calificacionesSearch !== "") && (
+                  <button
+                    onClick={() => {
+                      setSelectedCalificacionesAsignatura("all");
+                      setOnlyShowAtRiskCalificaciones(false);
+                      setCalificacionesSearch("");
+                    }}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
+                  >
+                    Restablecer todos los filtros
+                  </button>
                 )}
               </div>
-              {latestNegative ? (
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-800">
-                    {latestNegative.nombreCompleto}
-                  </h3>
 
-                  <p className="text-sm text-slate-600 italic line-clamp-3">
-                    "{latestNegative.descripcion}"
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-slate-400 py-4 italic text-center">
-                  No se encontraron anotaciones negativas.
-                </p>
-              )}
-            </div>
-          </article>
-        </section>
-
-        <section className="grid gap-4 xl:grid-cols-3">
-          <article className="h-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 font-semibold">Distribución de observaciones</h2>
-            <ResponsiveContainer width="100%" height="90%">
-              <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" outerRadius={90} innerRadius={45}>
-                  {pieData.map((entry, index) => (
-                    <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Legend />
-                <Tooltip />
-              </PieChart>
-            </ResponsiveContainer>
-          </article>
-
-          <article className="h-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="font-semibold">Evolución temporal (positivas vs negativas)</h2>
-              <div className="flex flex-wrap items-center gap-3">
-                {/* Selector de resolución temporal */}
-                <div className="flex rounded-lg bg-slate-100 p-0.5 border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => setTimeResolution("daily")}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${timeResolution === "daily"
-                      ? "bg-white text-slate-800 shadow-sm"
-                      : "text-slate-500 hover:text-slate-850"
-                      }`}
-                  >
-                    Diario (Líneas)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTimeResolution("monthly")}
-                    className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${timeResolution === "monthly"
-                      ? "bg-white text-slate-800 shadow-sm"
-                      : "text-slate-500 hover:text-slate-850"
-                      }`}
-                  >
-                    Mensual (Líneas)
-                  </button>
+              <div className="grid gap-4 sm:grid-cols-3">
+                {/* 1. Búsqueda por Estudiante */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Buscar Alumno
+                  </label>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={calificacionesSearch}
+                      onChange={(e) => setCalificacionesSearch(e.target.value)}
+                      placeholder="Nombre estudiante..."
+                      className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs outline-none ring-indigo-500 transition focus:ring"
+                    />
+                  </div>
                 </div>
 
-                {/* Filtros de la leyenda */}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowPositiveTrend(!showPositiveTrend)}
-                    className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${showPositiveTrend
-                      ? "bg-emerald-100 text-emerald-800 border-emerald-300"
-                      : "bg-slate-50 text-slate-400 border-slate-200 line-through"
-                      }`}
+                {/* 2. Filtro por Asignatura */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Ver Asignatura
+                  </label>
+                  <select
+                    value={selectedCalificacionesAsignatura}
+                    onChange={(e) => setSelectedCalificacionesAsignatura(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
                   >
-                    <span className={`h-2 w-2 rounded-full ${showPositiveTrend ? "bg-emerald-500" : "bg-slate-400"}`} />
-                    Positivas
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowNegativeTrend(!showNegativeTrend)}
-                    className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${showNegativeTrend
-                      ? "bg-rose-100 text-rose-800 border-rose-300"
-                      : "bg-slate-50 text-slate-400 border-slate-200 line-through"
-                      }`}
-                  >
-                    <span className={`h-2 w-2 rounded-full ${showNegativeTrend ? "bg-rose-500" : "bg-slate-400"}`} />
-                    Negativas
-                  </button>
+                    <option value="all">Promedios Generales (Todos)</option>
+                    {uniqueAsignaturasCalificaciones.map((subj) => (
+                      <option key={subj} value={subj}>
+                        {subj}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. Filtro Alumnos en Riesgo */}
+                <div className="flex flex-col justify-end pb-1.5">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 select-none">
+                    <input
+                      type="checkbox"
+                      checked={onlyShowAtRiskCalificaciones}
+                      onChange={(e) => setOnlyShowAtRiskCalificaciones(e.target.checked)}
+                      className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500"
+                    />
+                    <span>Mostrar solo estudiantes en riesgo (&lt; 4.0)</span>
+                  </label>
                 </div>
               </div>
             </div>
-            <ResponsiveContainer width="100%" height="80%">
-              {timeResolution === "daily" ? (
-                <LineChart data={trendData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="fecha" />
-                  <YAxis allowDecimals={false} />
-                  <Tooltip />
-                  {showPositiveTrend && (
-                    <Line type="monotone" dataKey="positivas" stroke="#10b981" strokeWidth={2} dot={{ r: 4, fill: "#10b981", stroke: "#10b981" }} name="Positivas" />
-                  )}
-                  {showPositiveTrend && (
-                    <Line type="monotone" dataKey="tendenciaPositiva" stroke="#059669" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Positivas" />
-                  )}
-                  {showNegativeTrend && (
-                    <Line type="monotone" dataKey="negativas" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: "#ef4444", stroke: "#ef4444" }} name="Negativas" />
-                  )}
-                  {showNegativeTrend && (
-                    <Line type="monotone" dataKey="tendenciaNegativa" stroke="#dc2626" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Negativas" />
-                  )}
-                </LineChart>
-              ) : (
-                <LineChart data={monthlyData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                  <XAxis dataKey="mes" />
-                  <YAxis allowDecimals={false} />
-                  <Tooltip />
-                  {showPositiveTrend && (
-                    <Line type="monotone" dataKey="positivas" stroke="#10b981" strokeWidth={2} dot={{ r: 4, fill: "#10b981", stroke: "#10b981" }} name="Positivas" />
-                  )}
-                  {showPositiveTrend && (
-                    <Line type="monotone" dataKey="tendenciaPositiva" stroke="#059669" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Positivas" />
-                  )}
-                  {showNegativeTrend && (
-                    <Line type="monotone" dataKey="negativas" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: "#ef4444", stroke: "#ef4444" }} name="Negativas" />
-                  )}
-                  {showNegativeTrend && (
-                    <Line type="monotone" dataKey="tendenciaNegativa" stroke="#dc2626" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Negativas" />
-                  )}
-                </LineChart>
-              )}
-            </ResponsiveContainer>
-          </article>
-        </section>
 
-        <section className="grid gap-4 lg:grid-cols-2">
-          {/* Tarjeta 1: Estudiantes con más positivas */}
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              Top 5 estudiantes con más positivas
-            </h2>
+            {/* Tabla de Resultados */}
             <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
+              <table className="min-w-full text-left text-sm border-collapse">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500 font-medium">
-                    <th className="px-4 py-3 text-center w-16">Puesto</th>
-                    <th className="px-4 py-3">Estudiante</th>
-                    <th className="px-4 py-3 text-center w-28">Anotaciones</th>
+                    <th className="px-3 py-3 w-16 text-center font-bold">Nº</th>
+                    <th className="px-4 py-3 min-w-[200px] font-bold">Estudiante</th>
+
+                    {/* Dynamic Header Columns for subject-specific view */}
+                    {selectedCalificacionesAsignatura !== "all" ? (
+                      <>
+                        {gradeHeaders.map((grade, gIdx) => (
+                          <th key={gIdx} className="px-2 py-3 text-center min-w-[70px]">
+                            <div className="font-bold">{grade.label}</div>
+                            {grade.weight && (
+                              <div className="text-[10px] text-slate-400 font-normal">{grade.weight}</div>
+                            )}
+                          </th>
+                        ))}
+                        <th className="px-3 py-3 text-center font-bold min-w-[70px]">P1</th>
+                        <th className="px-3 py-3 text-center font-bold min-w-[70px]">P2</th>
+                        <th className="px-3 py-3 text-center font-bold min-w-[70px]">PF</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-4 py-3 text-center font-bold min-w-[100px]">P1 General</th>
+                        <th className="px-4 py-3 text-center font-bold min-w-[100px]">P2 General</th>
+                        <th className="px-4 py-3 text-center font-bold min-w-[120px]">Promedio General</th>
+                      </>
+                    )}
+
+                    <th className="px-4 py-3 text-center font-bold min-w-[100px]">Estado</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {Array.from({ length: 5 }).map((_, index) => {
-                    const pos = topPositive[index];
-                    const rank = index + 1;
+                  {filteredCalificaciones.length > 0 ? (
+                    filteredCalificaciones.map((student) => {
+                      // Get stats based on selected subject vs all subjects
+                      let finalGrade: number | null = null;
+                      let p1Value: number | null = null;
+                      let p2Value: number | null = null;
+                      let studentGrades: GradeItem[] = [];
 
-                    let rankClass = "text-slate-500 bg-slate-50";
-                    if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
-                    else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
-                    else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+                      if (selectedCalificacionesAsignatura !== "all") {
+                        const studentSub = student.subjects.find(s => s.subjectName === selectedCalificacionesAsignatura);
+                        if (studentSub) {
+                          finalGrade = studentSub.pf;
+                          p1Value = studentSub.p1;
+                          p2Value = studentSub.p2;
+                          studentGrades = studentSub.grades;
+                        }
+                      } else {
+                        finalGrade = student.promedioGeneral;
+                        p1Value = student.periodo1;
+                        p2Value = student.periodo2;
+                      }
 
-                    return (
-                      <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
-                        <td className="px-4 py-3.5 text-center">
-                          <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
-                            {rank}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 font-medium text-slate-800">
-                          {pos ? pos.estudiante : <span className="text-slate-400 font-normal">-</span>}
-                        </td>
-                        <td className="px-4 py-3.5 text-center">
-                          {pos ? (
-                            <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
-                              {pos.totalObservaciones}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </article>
+                      const isApproved = finalGrade !== null && finalGrade >= 4.0;
+                      const hasGrade = finalGrade !== null && finalGrade > 0;
 
-          {/* Tarjeta 2: Estudiantes con más negativas */}
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-rose-500" />
-              Top 5 estudiantes con más negativas
-            </h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
-                    <th className="px-4 py-3 text-center w-16">Puesto</th>
-                    <th className="px-4 py-3">Estudiante</th>
-                    <th className="px-4 py-3 text-center w-28">Anotaciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Array.from({ length: 5 }).map((_, index) => {
-                    const neg = topNegative[index];
-                    const rank = index + 1;
+                      const getGradeClass = (gradeVal: number | null) => {
+                        if (gradeVal === null || gradeVal === 0) return "text-slate-400";
+                        if (gradeVal < 4.0) return "text-rose-600 font-extrabold";
+                        if (gradeVal >= 6.0) return "text-emerald-600 font-bold";
+                        return "text-slate-800 font-semibold";
+                      };
 
-                    let rankClass = "text-slate-500 bg-slate-50";
-                    if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
-                    else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
-                    else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
-
-                    return (
-                      <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
-                        <td className="px-4 py-3.5 text-center">
-                          <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
-                            {rank}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 font-medium text-slate-800">
-                          {neg ? neg.estudiante : <span className="text-slate-400 font-normal">-</span>}
-                        </td>
-                        <td className="px-4 py-3.5 text-center">
-                          {neg ? (
-                            <span className="inline-block rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">
-                              {neg.totalObservaciones}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </article>
-        </section>
-
-        <section className="grid gap-4 lg:grid-cols-2">
-          {/* Tarjeta 1: Funcionarios con más positivas */}
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              Top 5 funcionarios con más positivas
-            </h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
-                    <th className="px-4 py-3 text-center w-16">Puesto</th>
-                    <th className="px-4 py-3">Funcionario / Docente</th>
-                    <th className="px-4 py-3 text-center w-28">Anotaciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Array.from({ length: 5 }).map((_, index) => {
-                    const pos = topPositiveFuncionarios[index];
-                    const rank = index + 1;
-
-                    let rankClass = "text-slate-500 bg-slate-50";
-                    if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
-                    else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
-                    else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
-
-                    return (
-                      <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
-                        <td className="px-4 py-3.5 text-center">
-                          <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
-                            {rank}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 font-medium text-slate-800">
-                          {pos ? pos.funcionario : <span className="text-slate-400 font-normal">-</span>}
-                        </td>
-                        <td className="px-4 py-3.5 text-center">
-                          {pos ? (
-                            <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
-                              {pos.totalObservaciones}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </article>
-
-          {/* Tarjeta 2: Funcionarios con más negativas */}
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-rose-500" />
-              Top 5 funcionarios con más negativas
-            </h2>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
-                    <th className="px-4 py-3 text-center w-16">Puesto</th>
-                    <th className="px-4 py-3">Funcionario / Docente</th>
-                    <th className="px-4 py-3 text-center w-28">Anotaciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Array.from({ length: 5 }).map((_, index) => {
-                    const neg = topNegativeFuncionarios[index];
-                    const rank = index + 1;
-
-                    let rankClass = "text-slate-500 bg-slate-50";
-                    if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
-                    else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
-                    else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
-
-                    return (
-                      <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
-                        <td className="px-4 py-3.5 text-center">
-                          <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
-                            {rank}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3.5 font-medium text-slate-800">
-                          {neg ? neg.funcionario : <span className="text-slate-400 font-normal">-</span>}
-                        </td>
-                        <td className="px-4 py-3.5 text-center">
-                          {neg ? (
-                            <span className="inline-block rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">
-                              {neg.totalObservaciones}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </article>
-        </section>
-
-        <section className="grid gap-4 print:hidden">
-          <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-rose-500" />
-              Detalle de faltas registradas
-            </h2>
-            <div className="overflow-x-auto max-h-72 overflow-y-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
-                    <th className="px-4 py-3">Tipo / Gravedad de Falta</th>
-                    <th className="px-4 py-3 text-center w-28">Cantidad</th>
-                    <th className="px-4 py-3 text-center w-28">Porcentaje</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {faltasStats.totalValidos > 0 ? (
-                    faltasStats.data.map((item, index) => {
-                      const percentage = Math.round((item.value / faltasStats.totalValidos) * 100);
                       return (
-                        <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
-                          <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
-                          <td className="px-4 py-3 text-center font-bold text-slate-700">{item.value}</td>
-                          <td className="px-4 py-3 text-center">
-                            <span className="inline-block rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600">
-                              {percentage}%
-                            </span>
+                        <tr key={student.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                          <td className="px-3 py-3.5 text-center text-slate-500 whitespace-nowrap font-medium">
+                            {student.lista}
+                          </td>
+                          <td className="px-4 py-3.5 font-bold text-slate-800 whitespace-nowrap">
+                            {student.estudiante}
+                          </td>
+
+                          {selectedCalificacionesAsignatura !== "all" ? (
+                            <>
+                              {/* Render individual grades for subject */}
+                              {gradeHeaders.map((header, gIdx) => {
+                                const matchedGrade = studentGrades.find(g => g.label === header.label);
+                                const gValue = matchedGrade ? matchedGrade.value : null;
+                                return (
+                                  <td key={gIdx} className={`px-2 py-3.5 text-center whitespace-nowrap ${getGradeClass(gValue)}`}>
+                                    {gValue !== null ? gValue.toFixed(1).replace(".", ",") : "-"}
+                                  </td>
+                                );
+                              })}
+
+                              <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(p1Value)}`}>
+                                {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(p2Value)}`}>
+                                {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(finalGrade)} bg-slate-50/40`}>
+                                {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className={`px-4 py-3.5 text-center whitespace-nowrap ${getGradeClass(p1Value)}`}>
+                                {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className={`px-4 py-3.5 text-center whitespace-nowrap ${getGradeClass(p2Value)}`}>
+                                {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className={`px-4 py-3.5 text-center whitespace-nowrap ${getGradeClass(finalGrade)} bg-indigo-50/10`}>
+                                {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                            </>
+                          )}
+
+                          <td className="px-4 py-3.5 text-center whitespace-nowrap">
+                            {hasGrade ? (
+                              <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${isApproved
+                                  ? "bg-emerald-100 text-emerald-800"
+                                  : "bg-rose-100 text-rose-800"
+                                }`}>
+                                {isApproved ? "Aprobado" : "Reprobado"}
+                              </span>
+                            ) : (
+                              <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-medium bg-slate-100 text-slate-500">
+                                Sin Nota
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
                     })
                   ) : (
                     <tr>
-                      <td colSpan={3} className="text-center py-12 text-slate-400 italic">
-                        No se detectó información de faltas en la planilla cargada (se requieren columnas como "Falta" o "Gravedad").
+                      <td colSpan={selectedCalificacionesAsignatura !== "all" ? 5 + gradeHeaders.length : 6} className="text-center py-12 text-slate-400 italic">
+                        No se encontraron estudiantes que coincidan con los filtros.
                       </td>
                     </tr>
                   )}
                 </tbody>
+                {subjectColumnStats && (
+                  <tfoot className="border-t-2 border-slate-300 bg-slate-50 font-semibold text-slate-800">
+                    {/* Row 1: Promedio */}
+                    <tr>
+                      <td className="px-3 py-2.5 text-center whitespace-nowrap text-slate-400 font-bold">-</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap font-bold text-slate-800">Promedio Curso</td>
+                      {selectedCalificacionesAsignatura !== "all" ? (
+                        <>
+                          {gradeHeaders.map((header, gIdx) => {
+                            const stat = subjectColumnStats[header.label];
+                            const val = stat ? stat.promedio : null;
+                            return (
+                              <td key={`promedio-${gIdx}`} className="px-2 py-2.5 text-center whitespace-nowrap font-bold text-indigo-700">
+                                {val !== null ? val.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                            {subjectColumnStats["P1"]?.promedio !== null ? subjectColumnStats["P1"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                            {subjectColumnStats["P2"]?.promedio !== null ? subjectColumnStats["P2"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-indigo-800 bg-indigo-50">
+                            {subjectColumnStats["PF"]?.promedio !== null ? subjectColumnStats["PF"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                            {subjectColumnStats["P1 General"]?.promedio !== null ? subjectColumnStats["P1 General"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                            {subjectColumnStats["P2 General"]?.promedio !== null ? subjectColumnStats["P2 General"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-indigo-800 bg-indigo-50">
+                            {subjectColumnStats["Promedio General"]?.promedio !== null ? subjectColumnStats["Promedio General"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                        </>
+                      )}
+                      <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-slate-400">-</td>
+                    </tr>
+
+                    {/* Row 2: Desviación Estándar */}
+                    <tr className="text-slate-600 bg-slate-50/70 border-t border-slate-200">
+                      <td className="px-3 py-2 text-center whitespace-nowrap text-slate-400 font-normal">-</td>
+                      <td className="px-4 py-2 whitespace-nowrap font-medium text-slate-600 text-xs">Desviación Estándar</td>
+                      {selectedCalificacionesAsignatura !== "all" ? (
+                        <>
+                          {gradeHeaders.map((header, gIdx) => {
+                            const stat = subjectColumnStats[header.label];
+                            const val = stat ? stat.desviacion : null;
+                            return (
+                              <td key={`desv-${gIdx}`} className="px-2 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                                {val !== null ? val.toFixed(2).replace(".", ",") : "-"}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                            {subjectColumnStats["P1"]?.desviacion !== null ? subjectColumnStats["P1"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                            {subjectColumnStats["P2"]?.desviacion !== null ? subjectColumnStats["P2"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-slate-700 bg-indigo-50/40 text-xs">
+                            {subjectColumnStats["PF"]?.desviacion !== null ? subjectColumnStats["PF"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                            {subjectColumnStats["P1 General"]?.desviacion !== null ? subjectColumnStats["P1 General"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                            {subjectColumnStats["P2 General"]?.desviacion !== null ? subjectColumnStats["P2 General"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-semibold text-slate-700 bg-indigo-50/40 text-xs">
+                            {subjectColumnStats["Promedio General"]?.desviacion !== null ? subjectColumnStats["Promedio General"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                          </td>
+                        </>
+                      )}
+                      <td className="px-4 py-2 text-center whitespace-nowrap font-normal text-slate-400">-</td>
+                    </tr>
+
+                    {/* Row 3: Mínimo */}
+                    <tr className="text-slate-600 bg-slate-50/70 border-t border-slate-200">
+                      <td className="px-3 py-2 text-center whitespace-nowrap text-slate-400 font-normal">-</td>
+                      <td className="px-4 py-2 whitespace-nowrap font-medium text-slate-600 text-xs">Nota Mínima</td>
+                      {selectedCalificacionesAsignatura !== "all" ? (
+                        <>
+                          {gradeHeaders.map((header, gIdx) => {
+                            const stat = subjectColumnStats[header.label];
+                            const val = stat ? stat.minimo : null;
+                            return (
+                              <td key={`min-${gIdx}`} className="px-2 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                                {val !== null ? val.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                            {subjectColumnStats["P1"]?.minimo !== null ? subjectColumnStats["P1"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                            {subjectColumnStats["P2"]?.minimo !== null ? subjectColumnStats["P2"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-rose-700 bg-indigo-50/40 text-xs">
+                            {subjectColumnStats["PF"]?.minimo !== null ? subjectColumnStats["PF"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                            {subjectColumnStats["P1 General"]?.minimo !== null ? subjectColumnStats["P1 General"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                            {subjectColumnStats["P2 General"]?.minimo !== null ? subjectColumnStats["P2 General"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-semibold text-rose-700 bg-indigo-50/40 text-xs">
+                            {subjectColumnStats["Promedio General"]?.minimo !== null ? subjectColumnStats["Promedio General"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                        </>
+                      )}
+                      <td className="px-4 py-2 text-center whitespace-nowrap font-normal text-slate-400">-</td>
+                    </tr>
+
+                    {/* Row 4: Máximo */}
+                    <tr className="text-slate-600 bg-slate-50/70 border-t border-slate-200">
+                      <td className="px-3 py-2 text-center whitespace-nowrap text-slate-400 font-normal">-</td>
+                      <td className="px-4 py-2 whitespace-nowrap font-medium text-slate-600 text-xs">Nota Máxima</td>
+                      {selectedCalificacionesAsignatura !== "all" ? (
+                        <>
+                          {gradeHeaders.map((header, gIdx) => {
+                            const stat = subjectColumnStats[header.label];
+                            const val = stat ? stat.maximo : null;
+                            return (
+                              <td key={`max-${gIdx}`} className="px-2 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                                {val !== null ? val.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                            );
+                          })}
+                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                            {subjectColumnStats["P1"]?.maximo !== null ? subjectColumnStats["P1"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                            {subjectColumnStats["P2"]?.maximo !== null ? subjectColumnStats["P2"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-emerald-700 bg-indigo-50/40 text-xs">
+                            {subjectColumnStats["PF"]?.maximo !== null ? subjectColumnStats["PF"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                            {subjectColumnStats["P1 General"]?.maximo !== null ? subjectColumnStats["P1 General"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                            {subjectColumnStats["P2 General"]?.maximo !== null ? subjectColumnStats["P2 General"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-semibold text-emerald-700 bg-indigo-50/40 text-xs">
+                            {subjectColumnStats["Promedio General"]?.maximo !== null ? subjectColumnStats["Promedio General"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                          </td>
+                        </>
+                      )}
+                      <td className="px-4 py-2 text-center whitespace-nowrap font-normal text-slate-400">-</td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
-          </article>
-        </section>
+          </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm print:hidden">
-          <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Filter className="h-4 w-4 text-indigo-500" />
-                Panel de Filtros Rápidos
-              </h3>
-              {(selectedAsignaturaObs !== "all" || selectedCursoObs !== "all" || selectedFechaObs !== "all" || searchQuery !== "" || quickFilter !== "all") && (
-                <button
-                  onClick={() => {
-                    setSelectedAsignaturaObs("all");
-                    setSelectedCursoObs("all");
-                    setSelectedFechaObs("all");
-                    setSearchQuery("");
-                    setQuickFilter("all");
-                  }}
-                  className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
-                >
-                  Restablecer todos los filtros
-                </button>
+          {/* Card: Datos de Referencia y Leyendas */}
+          {excelExtraData && (
+            <section className="grid gap-6 md:grid-cols-2 print:hidden">
+              {/* Categorías Académicas */}
+              {excelExtraData.categorias.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="font-semibold text-slate-800 flex items-center gap-2 mb-4">
+                    <Info className="h-5 w-5 text-indigo-500" />
+                    Categorías Académicas (Reporte Excel)
+                  </h3>
+                  {(() => {
+                    const categoriesToShow = excelExtraData.categorias.map(cat => {
+                      const val = getExcelCategoryVal(
+                        cat.label,
+                        selectedCalificacionesAsignatura !== "all" ? "pf" : "pf_gen",
+                        selectedCalificacionesAsignatura !== "all" ? selectedCalificacionesAsignatura : undefined
+                      );
+                      return {
+                        label: cat.label,
+                        value: val !== null ? Number(val) : 0,
+                      };
+                    }).filter(c => !isNaN(c.value) && c.value > 0);
+
+                    if (categoriesToShow.length === 0) {
+                      return (
+                        <p className="text-xs text-slate-400 italic">
+                          No hay datos de categorías registradas en Excel para esta asignatura/vista.
+                        </p>
+                      );
+                    }
+
+                    const maxVal = Math.max(...categoriesToShow.map(c => c.value), 1);
+
+                    return (
+                      <div className="space-y-4">
+                        {categoriesToShow.map((cat, cIdx) => {
+                          let barColor = "bg-indigo-500";
+                          let bgLight = "bg-indigo-50";
+                          let textColor = "text-indigo-700";
+                          const lbl = cat.label.toLowerCase();
+                          if (lbl.includes("insuficiente") || lbl.includes("bajo") || lbl.includes("reprobado")) {
+                            barColor = "bg-rose-500";
+                            bgLight = "bg-rose-50";
+                            textColor = "text-rose-700";
+                          } else if (lbl.includes("elemental") || lbl.includes("medio") || lbl.includes("regular")) {
+                            barColor = "bg-amber-500";
+                            bgLight = "bg-amber-50";
+                            textColor = "text-amber-700";
+                          } else if (lbl.includes("adecuado") || lbl.includes("bueno") || lbl.includes("aprobado")) {
+                            barColor = "bg-emerald-500";
+                            bgLight = "bg-emerald-50";
+                            textColor = "text-emerald-700";
+                          } else if (lbl.includes("destacado") || lbl.includes("excelente") || lbl.includes("alto")) {
+                            barColor = "bg-purple-500";
+                            bgLight = "bg-purple-50";
+                            textColor = "text-purple-700";
+                          }
+
+                          const pct = (cat.value / maxVal) * 100;
+
+                          return (
+                            <div key={cIdx} className="space-y-1">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-medium text-slate-700">{cat.label}</span>
+                                <span className={`font-bold px-2 py-0.5 rounded-full text-[10px] ${bgLight} ${textColor}`}>
+                                  {cat.value} alumnos
+                                </span>
+                              </div>
+                              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
               )}
-            </div>
 
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {/* 1. Búsqueda de texto */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                  Buscar
-                </label>
-                <div className="relative">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="Estudiante..."
-                    className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs outline-none ring-indigo-500 transition focus:ring"
-                  />
+              {/* Leyenda de Siglas */}
+              {excelExtraData.leyendas.length > 0 && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="font-semibold text-slate-800 flex items-center gap-2 mb-3">
+                    <BookOpen className="h-5 w-5 text-indigo-500" />
+                    Leyenda de Siglas
+                  </h3>
+                  <div className="space-y-2">
+                    {excelExtraData.leyendas.map((leyenda, lIdx) => {
+                      const parts = leyenda.split(":");
+                      const abbreviation = parts[0] ? parts[0].trim() : "";
+                      const definition = parts[1] ? parts[1].trim() : "";
+                      return (
+                        <div key={lIdx} className="flex items-start gap-2 text-xs">
+                          <span className="inline-flex items-center justify-center font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] min-w-[32px] text-center">
+                            {abbreviation}
+                          </span>
+                          <span className="text-slate-600 font-medium">{definition}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+      </main>
+    );
+  }
+
+  return (
+    <>
+      <main className="flex-grow w-full bg-slate-100 px-4 py-8 text-slate-900 print:hidden">
+        {isLoading && (
+          <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
+            <div className="relative flex items-center justify-center h-20 w-20">
+              {/* Spinning outer gradient ring */}
+              <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-indigo-500 border-r-purple-500 animate-spin" />
+              {/* Secondary counter-spinning ring */}
+              <div className="absolute inset-1.5 rounded-full border-4 border-transparent border-b-blue-500 border-l-pink-500 animate-spin [animation-duration:1.5s]" />
+              {/* Inner glowing core */}
+              <div className="h-4 w-4 rounded-full bg-indigo-500 animate-ping" />
+            </div>
+            <p className="mt-6 text-[11px] font-extrabold uppercase tracking-widest text-slate-200 animate-pulse">
+              Cargando planilla automáticamente...
+            </p>
+          </div>
+        )}
+        <div className="mx-auto flex max-w-7xl flex-col gap-6">
+          <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold">Dashboard de Convivencia Escolar</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                Visualización y métricas de observaciones de convivencia escolar cargadas.
+              </p>
+            </div>
+            <div className="flex items-center gap-3 print:hidden">
+              <button
+                onClick={resetAll}
+                className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
+              >
+                Subir otro archivo
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition active:scale-95 shadow-sm whitespace-nowrap"
+              >
+                Generar PDF
+              </button>
+            </div>
+          </header>
+
+          {uploadedFilesCount > 1 && uniqueCursosObs.length > 0 && (
+            <div className="flex flex-wrap gap-2 p-2 bg-white border border-slate-200 rounded-2xl shadow-sm print:hidden">
+              <button
+                onClick={() => setActiveCourseTab("all")}
+                className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${activeCourseTab === "all"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+                  }`}
+              >
+                General
+              </button>
+              {uniqueCursosObs.map((curso) => (
+                <button
+                  key={curso}
+                  onClick={() => setActiveCourseTab(curso)}
+                  className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${activeCourseTab === curso
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+                    }`}
+                >
+                  {curso}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {/* Observaciones procesadas */}
+            <article className="relative overflow-hidden rounded-xl bg-blue-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                    <Users className="h-4 w-4" />
+                  </div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">Observaciones procesadas</p>
+                </div>
+                <p className="text-2xl font-extrabold">{total}</p>
+              </div>
+            </article>
+
+            {/* Anotaciones positivas */}
+            <article className="relative overflow-hidden rounded-xl bg-emerald-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                    <CheckCircle2 className="h-4 w-4" />
+                  </div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Anotaciones positivas</p>
+                </div>
+                <p className="text-2xl font-extrabold">{summary.positivas}</p>
+              </div>
+            </article>
+
+            {/* Anotaciones negativas */}
+            <article className="relative overflow-hidden rounded-xl bg-rose-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                    <AlertCircle className="h-4 w-4" />
+                  </div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-rose-100">Anotaciones negativas</p>
+                </div>
+                <p className="text-2xl font-extrabold">{summary.negativas}</p>
+              </div>
+            </article>
+
+            {/* Ratio de convivencia */}
+            <article className="group cursor-help relative overflow-visible rounded-xl bg-indigo-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none rounded-xl" />
+              <div className="relative z-10 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="rounded-lg bg-white/10 p-1.5 text-white">
+                    <Star className="h-4 w-4" />
+                  </div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Ratio de convivencia</p>
+                </div>
+                <p className="text-2xl font-extrabold">{positiveObservationsPercentage}%</p>
+              </div>
+
+              {/* Hover Explanatory Popup Tooltip */}
+              <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-3 w-64 -translate-x-1/2 rounded-xl bg-slate-950 p-3 text-[11px] text-slate-100 shadow-xl opacity-0 transition-all duration-200 scale-95 origin-bottom group-hover:opacity-100 group-hover:scale-100 select-none">
+                <p className="font-bold text-white mb-1">¿Cómo se calcula este ratio?</p>
+                <p className="text-slate-350 leading-relaxed">
+                  Representa el porcentaje de anotaciones positivas sobre el total combinado de anotaciones positivas y negativas (excluyendo entrevistas u otros registros).
+                </p>
+                <div className="absolute top-full left-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1 rotate-45 bg-slate-950" />
+              </div>
+            </article>
+          </section>
+
+          <section className="grid gap-4 md:grid-cols-2">
+            <article className="rounded-2xl border-l-4 border-l-emerald-500 border-y border-r border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
+                    Última Anotación Positiva
+                  </span>
+                  {latestPositive && (
+                    <span className="text-xs text-slate-500">
+                      {latestPositive.fechaTexto}
+                    </span>
+                  )}
+                </div>
+                {latestPositive ? (
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-800">
+                      {latestPositive.nombreCompleto}
+                    </h3>
+
+                    <p className="text-sm text-slate-600 italic line-clamp-3">
+                      &quot;{latestPositive.descripcion}&quot;
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400 py-4 italic text-center">
+                    No se encontraron anotaciones positivas.
+                  </p>
+                )}
+              </div>
+            </article>
+
+            <article className="rounded-2xl border-l-4 border-l-rose-500 border-y border-r border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full">
+                    Última Anotación Negativa
+                  </span>
+                  {latestNegative && (
+                    <span className="text-xs text-slate-500">
+                      {latestNegative.fechaTexto}
+                    </span>
+                  )}
+                </div>
+                {latestNegative ? (
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-800">
+                      {latestNegative.nombreCompleto}
+                    </h3>
+
+                    <p className="text-sm text-slate-600 italic line-clamp-3">
+                      &quot;{latestNegative.descripcion}&quot;
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-400 py-4 italic text-center">
+                    No se encontraron anotaciones negativas.
+                  </p>
+                )}
+              </div>
+            </article>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-3">
+            <article className="h-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="mb-3 font-semibold">Distribución de observaciones</h2>
+              <ResponsiveContainer width="100%" height="90%">
+                <PieChart>
+                  <Pie data={pieData} dataKey="value" nameKey="name" outerRadius={90} innerRadius={45}>
+                    {pieData.map((entry, index) => (
+                      <Cell key={entry.name} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Legend />
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </article>
+
+            <article className="h-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <h2 className="font-semibold">Evolución temporal (positivas vs negativas)</h2>
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Selector de resolución temporal */}
+                  <div className="flex rounded-lg bg-slate-100 p-0.5 border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setTimeResolution("daily")}
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${timeResolution === "daily"
+                        ? "bg-white text-slate-800 shadow-sm"
+                        : "text-slate-500 hover:text-slate-850"
+                        }`}
+                    >
+                      Diario (Líneas)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTimeResolution("monthly")}
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${timeResolution === "monthly"
+                        ? "bg-white text-slate-800 shadow-sm"
+                        : "text-slate-500 hover:text-slate-850"
+                        }`}
+                    >
+                      Mensual (Líneas)
+                    </button>
+                  </div>
+
+                  {/* Filtros de la leyenda */}
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowPositiveTrend(!showPositiveTrend)}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${showPositiveTrend
+                        ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                        : "bg-slate-50 text-slate-400 border-slate-200 line-through"
+                        }`}
+                    >
+                      <span className={`h-2 w-2 rounded-full ${showPositiveTrend ? "bg-emerald-500" : "bg-slate-400"}`} />
+                      Positivas
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowNegativeTrend(!showNegativeTrend)}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${showNegativeTrend
+                        ? "bg-rose-100 text-rose-800 border-rose-300"
+                        : "bg-slate-50 text-slate-400 border-slate-200 line-through"
+                        }`}
+                    >
+                      <span className={`h-2 w-2 rounded-full ${showNegativeTrend ? "bg-rose-500" : "bg-slate-400"}`} />
+                      Negativas
+                    </button>
+                  </div>
                 </div>
               </div>
+              <ResponsiveContainer width="100%" height="80%">
+                {timeResolution === "daily" ? (
+                  <LineChart data={trendData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="fecha" />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    {showPositiveTrend && (
+                      <Line type="monotone" dataKey="positivas" stroke="#10b981" strokeWidth={2} dot={{ r: 4, fill: "#10b981", stroke: "#10b981" }} name="Positivas" />
+                    )}
+                    {showPositiveTrend && (
+                      <Line type="monotone" dataKey="tendenciaPositiva" stroke="#059669" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Positivas" />
+                    )}
+                    {showNegativeTrend && (
+                      <Line type="monotone" dataKey="negativas" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: "#ef4444", stroke: "#ef4444" }} name="Negativas" />
+                    )}
+                    {showNegativeTrend && (
+                      <Line type="monotone" dataKey="tendenciaNegativa" stroke="#dc2626" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Negativas" />
+                    )}
+                  </LineChart>
+                ) : (
+                  <LineChart data={monthlyData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="mes" />
+                    <YAxis allowDecimals={false} />
+                    <Tooltip />
+                    {showPositiveTrend && (
+                      <Line type="monotone" dataKey="positivas" stroke="#10b981" strokeWidth={2} dot={{ r: 4, fill: "#10b981", stroke: "#10b981" }} name="Positivas" />
+                    )}
+                    {showPositiveTrend && (
+                      <Line type="monotone" dataKey="tendenciaPositiva" stroke="#059669" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Positivas" />
+                    )}
+                    {showNegativeTrend && (
+                      <Line type="monotone" dataKey="negativas" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: "#ef4444", stroke: "#ef4444" }} name="Negativas" />
+                    )}
+                    {showNegativeTrend && (
+                      <Line type="monotone" dataKey="tendenciaNegativa" stroke="#dc2626" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Negativas" />
+                    )}
+                  </LineChart>
+                )}
+              </ResponsiveContainer>
+            </article>
+          </section>
 
-              {/* 2. Filtro de Tipo */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                  Tipo
-                </label>
-                <select
-                  value={quickFilter}
-                  onChange={(e) => setQuickFilter(e.target.value as any)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
-                >
-                  <option value="all">Ver todo</option>
-                  <option value="positiva">Solo positivas</option>
-                  <option value="negativa">Solo negativas</option>
-                  <option value="otros">Otros / Entrevistas</option>
-                </select>
+          <section className="grid gap-4 lg:grid-cols-2">
+            {/* Tarjeta 1: Estudiantes con más positivas */}
+            <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                Top 5 estudiantes con más positivas
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                      <th className="px-4 py-3 text-center w-16">Puesto</th>
+                      <th className="px-4 py-3">Estudiante</th>
+                      <th className="px-4 py-3 text-center w-28">Anotaciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const pos = topPositive[index];
+                      const rank = index + 1;
+
+                      let rankClass = "text-slate-500 bg-slate-50";
+                      if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
+                      else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
+                      else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+
+                      return (
+                        <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                          <td className="px-4 py-3.5 text-center">
+                            <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
+                              {rank}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 font-medium text-slate-800">
+                            {pos ? pos.estudiante : <span className="text-slate-400 font-normal">-</span>}
+                          </td>
+                          <td className="px-4 py-3.5 text-center">
+                            {pos ? (
+                              <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                                {pos.totalObservaciones}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            {/* Tarjeta 2: Estudiantes con más negativas */}
+            <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-rose-500" />
+                Top 5 estudiantes con más negativas
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                      <th className="px-4 py-3 text-center w-16">Puesto</th>
+                      <th className="px-4 py-3">Estudiante</th>
+                      <th className="px-4 py-3 text-center w-28">Anotaciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const neg = topNegative[index];
+                      const rank = index + 1;
+
+                      let rankClass = "text-slate-500 bg-slate-50";
+                      if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
+                      else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
+                      else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+
+                      return (
+                        <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                          <td className="px-4 py-3.5 text-center">
+                            <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
+                              {rank}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 font-medium text-slate-800">
+                            {neg ? neg.estudiante : <span className="text-slate-400 font-normal">-</span>}
+                          </td>
+                          <td className="px-4 py-3.5 text-center">
+                            {neg ? (
+                              <span className="inline-block rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">
+                                {neg.totalObservaciones}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-2">
+            {/* Tarjeta 1: Funcionarios con más positivas */}
+            <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                Top 5 funcionarios con más positivas
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                      <th className="px-4 py-3 text-center w-16">Puesto</th>
+                      <th className="px-4 py-3">Funcionario / Docente</th>
+                      <th className="px-4 py-3 text-center w-28">Anotaciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const pos = topPositiveFuncionarios[index];
+                      const rank = index + 1;
+
+                      let rankClass = "text-slate-500 bg-slate-50";
+                      if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
+                      else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
+                      else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+
+                      return (
+                        <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                          <td className="px-4 py-3.5 text-center">
+                            <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
+                              {rank}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 font-medium text-slate-800">
+                            {pos ? pos.funcionario : <span className="text-slate-400 font-normal">-</span>}
+                          </td>
+                          <td className="px-4 py-3.5 text-center">
+                            {pos ? (
+                              <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
+                                {pos.totalObservaciones}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            {/* Tarjeta 2: Funcionarios con más negativas */}
+            <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-rose-500" />
+                Top 5 funcionarios con más negativas
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                      <th className="px-4 py-3 text-center w-16">Puesto</th>
+                      <th className="px-4 py-3">Funcionario / Docente</th>
+                      <th className="px-4 py-3 text-center w-28">Anotaciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const neg = topNegativeFuncionarios[index];
+                      const rank = index + 1;
+
+                      let rankClass = "text-slate-500 bg-slate-50";
+                      if (rank === 1) rankClass = "bg-amber-100 text-amber-800 font-bold ring-1 ring-amber-200";
+                      else if (rank === 2) rankClass = "bg-slate-100 text-slate-700 font-bold ring-1 ring-slate-200";
+                      else if (rank === 3) rankClass = "bg-orange-50 text-orange-700 font-bold ring-1 ring-orange-100";
+
+                      return (
+                        <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                          <td className="px-4 py-3.5 text-center">
+                            <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>
+                              {rank}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 font-medium text-slate-800">
+                            {neg ? neg.funcionario : <span className="text-slate-400 font-normal">-</span>}
+                          </td>
+                          <td className="px-4 py-3.5 text-center">
+                            {neg ? (
+                              <span className="inline-block rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">
+                                {neg.totalObservaciones}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+
+          <section className="grid gap-4 print:hidden">
+            <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-rose-500" />
+                Detalle de faltas registradas
+              </h2>
+              <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                      <th className="px-4 py-3">Tipo / Gravedad de Falta</th>
+                      <th className="px-4 py-3 text-center w-28">Cantidad</th>
+                      <th className="px-4 py-3 text-center w-28">Porcentaje</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {faltasStats.totalValidos > 0 ? (
+                      faltasStats.data.map((item, index) => {
+                        const percentage = Math.round((item.value / faltasStats.totalValidos) * 100);
+                        return (
+                          <tr key={index} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                            <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
+                            <td className="px-4 py-3 text-center font-bold text-slate-700">{item.value}</td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="inline-block rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-indigo-600">
+                                {percentage}%
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={3} className="text-center py-12 text-slate-400 italic">
+                          No se detectó información de faltas en la planilla cargada (se requieren columnas como &quot;Falta&quot; o &quot;Gravedad&quot;).
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm print:hidden">
+            <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                  <Filter className="h-4 w-4 text-indigo-500" />
+                  Panel de Filtros Rápidos
+                </h3>
+                {(selectedAsignaturaObs !== "all" || selectedCursoObs !== "all" || selectedFechaObs !== "all" || searchQuery !== "" || quickFilter !== "all") && (
+                  <button
+                    onClick={() => {
+                      setSelectedAsignaturaObs("all");
+                      setSelectedCursoObs("all");
+                      setSelectedFechaObs("all");
+                      setSearchQuery("");
+                      setQuickFilter("all");
+                    }}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
+                  >
+                    Restablecer todos los filtros
+                  </button>
+                )}
               </div>
 
-              {/* 3. Filtro de Asignatura */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                  Gravedad
-                </label>
-                <select
-                  value={selectedAsignaturaObs}
-                  onChange={(e) => setSelectedAsignaturaObs(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
-                >
-                  <option value="all">Todas</option>
-                  {uniqueAsignaturasObs.map((item) => (
-                    <option key={item.name} value={item.name}>
-                      {item.name} ({item.count})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {/* 1. Búsqueda de texto */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Buscar
+                  </label>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Estudiante..."
+                      className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs outline-none ring-indigo-500 transition focus:ring"
+                    />
+                  </div>
+                </div>
 
-              {/* 5. Filtro de Fecha */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                  Fecha
-                </label>
-                <select
-                  value={selectedFechaObs}
-                  onChange={(e) => setSelectedFechaObs(e.target.value)}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
-                >
-                  <option value="all">Todas</option>
-                  {uniqueFechasObs.map((f) => (
-                    <option key={f} value={f}>
-                      {formatDateToVerbal(f)}
-                    </option>
-                  ))}
-                </select>
+                {/* 2. Filtro de Tipo */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Tipo
+                  </label>
+                  <select
+                    value={quickFilter}
+                    onChange={(e) => setQuickFilter(e.target.value as QuickFilter)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
+                  >
+                    <option value="all">Ver todo</option>
+                    <option value="positiva">Solo positivas</option>
+                    <option value="negativa">Solo negativas</option>
+                    <option value="otros">Otros / Entrevistas</option>
+                  </select>
+                </div>
+
+                {/* 3. Filtro de Asignatura */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Gravedad
+                  </label>
+                  <select
+                    value={selectedAsignaturaObs}
+                    onChange={(e) => setSelectedAsignaturaObs(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
+                  >
+                    <option value="all">Todas</option>
+                    {uniqueAsignaturasObs.map((item) => (
+                      <option key={item.name} value={item.name}>
+                        {item.name} ({item.count})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 5. Filtro de Fecha */}
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Fecha
+                  </label>
+                  <select
+                    value={selectedFechaObs}
+                    onChange={(e) => setSelectedFechaObs(e.target.value)}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
+                  >
+                    <option value="all">Todas</option>
+                    {uniqueFechasObs.map((f) => (
+                      <option key={f} value={f}>
+                        {formatDateToVerbal(f)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-200 text-slate-500 font-medium">
-                  <th className="px-4 py-3 min-w-[100px]">Fecha</th>
-                  <th className="px-4 py-3 min-w-[200px]">Estudiante</th>
-                  <th className="px-4 py-3 min-w-[140px] whitespace-nowrap">Tipo</th>
-                  <th className="px-4 py-3">Descripción</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
-                    <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{row.fechaTexto || "-"}</td>
-                    <td className="px-4 py-3 font-medium whitespace-nowrap">{row.nombreCompleto}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClasses(row.tipo)}`}>
-                        {typeLabel(row.tipo)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">{row.descripcion}</td>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                    <th className="px-4 py-3 min-w-[100px]">Fecha</th>
+                    <th className="px-4 py-3 min-w-[200px]">Estudiante</th>
+                    <th className="px-4 py-3 min-w-[140px] whitespace-nowrap">Tipo</th>
+                    <th className="px-4 py-3">Descripción</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody>
+                  {filteredRows.map((row) => (
+                    <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                      <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{row.fechaTexto || "-"}</td>
+                      <td className="px-4 py-3 font-medium whitespace-nowrap">{row.nombreCompleto}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${typeBadgeClasses(row.tipo)}`}>
+                          {typeLabel(row.tipo)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{row.descripcion}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      {/* Reporte de impresión limpio y compacto */}
+      <div className="hidden print:block bg-white text-black font-sans p-2 text-xs leading-normal">
+        {appMode === "calificaciones" ? (
+          <>
+            <header className="border-b border-slate-400 pb-2 mb-3 flex justify-between items-end">
+              <div>
+                <h1 className="text-lg font-bold text-slate-900">Reporte de Calificaciones y Rendimiento</h1>
+                <p className="text-[10px] text-slate-500">Kimche Analyzer - Análisis de Rendimiento Escolar</p>
+              </div>
+              <div className="text-right text-[9px] text-slate-600">
+                <p><strong>Fecha Emisión:</strong> {new Date().toLocaleDateString("es-CL", { day: "numeric", month: "long", year: "numeric" })}</p>
+                <p><strong>Asignatura Activa:</strong> {selectedCalificacionesAsignatura === "all" ? "Todas las asignaturas" : selectedCalificacionesAsignatura}</p>
+              </div>
+            </header>
+
+            {/* Métricas clave */}
+            <div className="grid grid-cols-4 gap-3 mb-3">
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Promedio General</p>
+                <p className="text-base font-bold text-slate-900 mt-0.5">{promedioGeneralCurso.toFixed(2)}</p>
+              </div>
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Tasa de Aprobación</p>
+                <p className="text-base font-bold text-slate-800 mt-0.5">{tasaAprobacion}%</p>
+              </div>
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Total Alumnos</p>
+                <p className="text-base font-bold text-slate-800 mt-0.5">{calificaciones.length}</p>
+              </div>
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Asignaturas</p>
+                <p className="text-base font-bold text-slate-800 mt-0.5">{uniqueAsignaturasCalificaciones.length}</p>
+              </div>
+            </div>
+
+            {/* Tabla de Alumnos */}
+            <div>
+              <h3 className="text-[10px] font-bold text-slate-800 border-b border-slate-400 pb-0.5 mb-1">Listado de Calificaciones</h3>
+              <table className="w-full text-[9px] border border-slate-300 border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-300">
+                    <th className="py-0.5 px-1 text-center font-semibold w-8">Nº</th>
+                    <th className="py-0.5 px-1 text-left font-semibold">Estudiante</th>
+                    {selectedCalificacionesAsignatura !== "all" ? (
+                      <>
+                        {calificaciones.find(s => s.subjects.some(sub => sub.subjectName === selectedCalificacionesAsignatura))
+                          ?.subjects.find(sub => sub.subjectName === selectedCalificacionesAsignatura)
+                          ?.grades.map((grade, gIdx) => (
+                            <th key={gIdx} className="py-0.5 px-1 text-center font-semibold" style={{ minWidth: '24px' }}>{grade.label}</th>
+                          ))
+                        }
+                        <th className="py-0.5 px-1 text-center font-semibold w-10">P1</th>
+                        <th className="py-0.5 px-1 text-center font-semibold w-10">P2</th>
+                        <th className="py-0.5 px-1 text-center font-semibold w-10">PF</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="py-0.5 px-1 text-center font-semibold w-16">P1 Gral</th>
+                        <th className="py-0.5 px-1 text-center font-semibold w-16">P2 Gral</th>
+                        <th className="py-0.5 px-1 text-center font-semibold w-20">Promedio Gral</th>
+                      </>
+                    )}
+                    <th className="py-0.5 px-1 text-center font-semibold w-16">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCalificaciones.map((student) => {
+                    let finalGrade: number | null = null;
+                    let p1Value: number | null = null;
+                    let p2Value: number | null = null;
+                    let studentGrades: GradeItem[] = [];
+
+                    if (selectedCalificacionesAsignatura !== "all") {
+                      const studentSub = student.subjects.find(s => s.subjectName === selectedCalificacionesAsignatura);
+                      if (studentSub) {
+                        finalGrade = studentSub.pf;
+                        p1Value = studentSub.p1;
+                        p2Value = studentSub.p2;
+                        studentGrades = studentSub.grades;
+                      }
+                    } else {
+                      finalGrade = student.promedioGeneral;
+                      p1Value = student.periodo1;
+                      p2Value = student.periodo2;
+                    }
+
+                    const isApproved = finalGrade !== null && finalGrade >= 4.0;
+                    const hasGrade = finalGrade !== null && finalGrade > 0;
+
+                    return (
+                      <tr key={student.id} className="border-b border-slate-200">
+                        <td className="py-0.5 px-1 text-center">{student.lista}</td>
+                        <td className="py-0.5 px-1 font-medium">{student.estudiante}</td>
+
+                        {selectedCalificacionesAsignatura !== "all" ? (
+                          <>
+                            {studentGrades.map((g, gIdx) => (
+                              <td key={gIdx} className={`py-0.5 px-1 text-center ${g.value !== null && g.value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                                {g.value !== null ? g.value.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                            ))}
+                            <td className={`py-0.5 px-1 text-center ${p1Value !== null && p1Value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                              {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
+                            </td>
+                            <td className={`py-0.5 px-1 text-center ${p2Value !== null && p2Value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                              {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
+                            </td>
+                            <td className={`py-0.5 px-1 text-center font-bold ${finalGrade !== null && finalGrade < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                              {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className={`py-0.5 px-1 text-center ${p1Value !== null && p1Value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                              {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
+                            </td>
+                            <td className={`py-0.5 px-1 text-center ${p2Value !== null && p2Value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                              {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
+                            </td>
+                            <td className={`py-0.5 px-1 text-center font-bold ${finalGrade !== null && finalGrade < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                              {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
+                            </td>
+                          </>
+                        )}
+
+                        <td className="py-0.5 px-1 text-center font-semibold">
+                          {hasGrade ? (isApproved ? "Aprobado" : "Reprobado") : "Sin Nota"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <>
+            <header className="border-b border-slate-400 pb-2 mb-3 flex justify-between items-end">
+              <div>
+                <h1 className="text-lg font-bold text-slate-900">Reporte de Convivencia Escolar</h1>
+                <p className="text-[10px] text-slate-500">Kimche Analyzer - Análisis de Observaciones</p>
+              </div>
+              <div className="text-right text-[9px] text-slate-650">
+                <p><strong>Fecha Emisión:</strong> {new Date().toLocaleDateString("es-CL", { day: "numeric", month: "long", year: "numeric" })}</p>
+                <p><strong>Curso Activo:</strong> {activeCourseTab === "all" ? "Todos los cursos" : activeCourseTab}</p>
+              </div>
+            </header>
+
+            {/* Filtros aplicados */}
+            {(selectedCursoObs !== "all" || selectedAsignaturaObs !== "all" || selectedFechaObs !== "all" || searchQuery !== "" || quickFilter !== "all") && (
+              <div className="mb-3 bg-slate-50 border border-slate-200 p-1.5 rounded text-[9px] text-slate-700">
+                <p className="font-semibold mb-0.5">Filtros aplicados en la consulta:</p>
+                <div className="grid grid-cols-3 gap-x-2 gap-y-0.5">
+                  {selectedCursoObs !== "all" && <p>• <strong>Curso:</strong> {selectedCursoObs}</p>}
+                  {selectedAsignaturaObs !== "all" && <p>• <strong>Gravedad/Asig:</strong> {selectedAsignaturaObs}</p>}
+                  {selectedFechaObs !== "all" && <p>• <strong>Fecha:</strong> {formatDateToVerbal(selectedFechaObs)}</p>}
+                  {quickFilter !== "all" && <p>• <strong>Tipo:</strong> {quickFilter === "positiva" ? "Solo positivas" : quickFilter === "negativa" ? "Solo negativas" : "Otros"}</p>}
+                  {searchQuery !== "" && <p>• <strong>Búsqueda:</strong> &quot;{searchQuery}&quot;</p>}
+                </div>
+              </div>
+            )}
+
+            {/* Métricas clave */}
+            <div className="grid grid-cols-4 gap-3 mb-3">
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Obs. Procesadas</p>
+                <p className="text-base font-bold text-slate-900 mt-0.5">{total}</p>
+              </div>
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Anot. Positivas</p>
+                <p className="text-base font-bold text-slate-800 mt-0.5">{summary.positivas}</p>
+              </div>
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Anot. Negativas</p>
+                <p className="text-base font-bold text-slate-800 mt-0.5">{summary.negativas}</p>
+              </div>
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Ratio Convivencia</p>
+                <p className="text-base font-bold text-slate-800 mt-0.5">{positiveObservationsPercentage}%</p>
+              </div>
+            </div>
+
+            {/* Últimas anotaciones */}
+            <div className="grid grid-cols-2 gap-3 mb-3 print-avoid-break">
+              <div className="border border-slate-300 p-2 rounded">
+                <p className="font-bold text-[9px] text-slate-700 uppercase mb-0.5">Última Anotación Positiva</p>
+                {latestPositive ? (
+                  <div>
+                    <p className="font-bold text-[10px] text-slate-900">{latestPositive.nombreCompleto}</p>
+                    <p className="text-[8px] text-slate-500 mb-0.5">{latestPositive.fechaTexto}</p>
+                    <p className="text-[9px] text-slate-750 italic">&quot;{latestPositive.descripcion}&quot;</p>
+                  </div>
+                ) : (
+                  <p className="text-[9px] text-slate-400 italic">No se encontraron anotaciones positivas.</p>
+                )}
+              </div>
+              <div className="border border-slate-300 p-2 rounded">
+                <p className="font-bold text-[9px] text-slate-700 uppercase mb-0.5">Última Anotación Negativa</p>
+                {latestNegative ? (
+                  <div>
+                    <p className="font-bold text-[10px] text-slate-900">{latestNegative.nombreCompleto}</p>
+                    <p className="text-[8px] text-slate-500 mb-0.5">{latestNegative.fechaTexto}</p>
+                    <p className="text-[9px] text-slate-750 italic">&quot;{latestNegative.descripcion}&quot;</p>
+                  </div>
+                ) : (
+                  <p className="text-[9px] text-slate-400 italic">No se encontraron anotaciones negativas.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Tops de Estudiantes */}
+            <div className="grid grid-cols-2 gap-3 mb-3 print-avoid-break">
+              <div>
+                <h3 className="text-[10px] font-bold text-slate-800 border-b border-slate-400 pb-0.5 mb-1">Top 5 Estudiantes (Positivas)</h3>
+                <table className="w-full text-[9px] border border-slate-300 border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-300">
+                      <th className="py-0.5 px-1 text-center font-semibold w-6">#</th>
+                      <th className="py-0.5 px-1 text-left font-semibold">Estudiante</th>
+                      <th className="py-0.5 px-1 text-center font-semibold w-10">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const item = topPositive[index];
+                      return (
+                        <tr key={index} className={index === 4 ? "" : "border-b border-slate-200"}>
+                          <td className="py-0.5 px-1 text-center">{index + 1}</td>
+                          <td className="py-0.5 px-1 font-medium">{item ? item.estudiante : "-"}</td>
+                          <td className="py-0.5 px-1 text-center font-bold">{item ? item.totalObservaciones : "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <h3 className="text-[10px] font-bold text-slate-800 border-b border-slate-400 pb-0.5 mb-1">Top 5 Estudiantes (Negativas)</h3>
+                <table className="w-full text-[9px] border border-slate-300 border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-300">
+                      <th className="py-0.5 px-1 text-center font-semibold w-6">#</th>
+                      <th className="py-0.5 px-1 text-left font-semibold">Estudiante</th>
+                      <th className="py-0.5 px-1 text-center font-semibold w-10">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const item = topNegative[index];
+                      return (
+                        <tr key={index} className={index === 4 ? "" : "border-b border-slate-200"}>
+                          <td className="py-0.5 px-1 text-center">{index + 1}</td>
+                          <td className="py-0.5 px-1 font-medium">{item ? item.estudiante : "-"}</td>
+                          <td className="py-0.5 px-1 text-center font-bold">{item ? item.totalObservaciones : "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Tops de Funcionarios */}
+            <div className="grid grid-cols-2 gap-3 mb-3 print-avoid-break">
+              <div>
+                <h3 className="text-[10px] font-bold text-slate-800 border-b border-slate-400 pb-0.5 mb-1">Top 5 Funcionarios (Positivas)</h3>
+                <table className="w-full text-[9px] border border-slate-300 border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-300">
+                      <th className="py-0.5 px-1 text-center font-semibold w-6">#</th>
+                      <th className="py-0.5 px-1 text-left font-semibold">Funcionario</th>
+                      <th className="py-0.5 px-1 text-center font-semibold w-10">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const item = topPositiveFuncionarios[index];
+                      return (
+                        <tr key={index} className={index === 4 ? "" : "border-b border-slate-200"}>
+                          <td className="py-0.5 px-1 text-center">{index + 1}</td>
+                          <td className="py-0.5 px-1 font-medium">{item ? item.funcionario : "-"}</td>
+                          <td className="py-0.5 px-1 text-center font-bold">{item ? item.totalObservaciones : "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div>
+                <h3 className="text-[10px] font-bold text-slate-800 border-b border-slate-400 pb-0.5 mb-1">Top 5 Funcionarios (Negativas)</h3>
+                <table className="w-full text-[9px] border border-slate-300 border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-300">
+                      <th className="py-0.5 px-1 text-center font-semibold w-6">#</th>
+                      <th className="py-0.5 px-1 text-left font-semibold">Funcionario</th>
+                      <th className="py-0.5 px-1 text-center font-semibold w-10">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Array.from({ length: 5 }).map((_, index) => {
+                      const item = topNegativeFuncionarios[index];
+                      return (
+                        <tr key={index} className={index === 4 ? "" : "border-b border-slate-200"}>
+                          <td className="py-0.5 px-1 text-center">{index + 1}</td>
+                          <td className="py-0.5 px-1 font-medium">{item ? item.funcionario : "-"}</td>
+                          <td className="py-0.5 px-1 text-center font-bold">{item ? item.totalObservaciones : "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
       </div>
-    </main>
+    </>
   );
 }
