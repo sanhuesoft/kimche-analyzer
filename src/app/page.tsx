@@ -3078,6 +3078,61 @@ export default function Home() {
                 </article>
               </section>
 
+              {/* Leyenda Criterios de Riesgo de Repitencia */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm print:hidden">
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+                    <Info className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-sm">
+                      Criterios para el Riesgo de Repitencia
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Un estudiante se considera en riesgo de repitencia si cumple con al menos uno de los siguientes criterios:
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="flex flex-col rounded-xl bg-slate-50 p-4 border border-slate-100 hover:border-rose-100 hover:bg-rose-50/20 transition-all duration-300">
+                    <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-full uppercase tracking-wider self-start">
+                      Criterio 1
+                    </span>
+                    <p className="text-xs font-semibold text-slate-700 mt-2.5 leading-relaxed">
+                      Reprobar tres o más asignaturas
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col rounded-xl bg-slate-50 p-4 border border-slate-100 hover:border-rose-100 hover:bg-rose-50/20 transition-all duration-300">
+                    <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-full uppercase tracking-wider self-start">
+                      Criterio 2
+                    </span>
+                    <p className="text-xs font-semibold text-slate-700 mt-2.5 leading-relaxed">
+                      Un promedio insuficiente y promedio general menor a 4,5
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col rounded-xl bg-slate-50 p-4 border border-slate-100 hover:border-rose-100 hover:bg-rose-50/20 transition-all duration-300">
+                    <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-full uppercase tracking-wider self-start">
+                      Criterio 3
+                    </span>
+                    <p className="text-xs font-semibold text-slate-700 mt-2.5 leading-relaxed">
+                      Dos promedios insuficientes y promedio general menor a 5,0
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col rounded-xl bg-slate-50 p-4 border border-slate-100 hover:border-rose-100 hover:bg-rose-50/20 transition-all duration-300">
+                    <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2.5 py-0.5 rounded-full uppercase tracking-wider self-start">
+                      Criterio 4
+                    </span>
+                    <p className="text-xs font-semibold text-slate-700 mt-2.5 leading-relaxed">
+                      Asistencia menor a 85%
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               {/* Filtros de Riesgo */}
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
