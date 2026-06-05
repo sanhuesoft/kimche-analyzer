@@ -105,6 +105,17 @@ interface ExcelExtraData {
   leyendas: string[];
 }
 
+interface RiesgoStudent {
+  id: string;
+  lista: string;
+  estudiante: string;
+  run: string;
+  dv: string;
+  promedioGeneral: number | null;
+  asistencia: string | null;
+  dynamicFields: Record<string, string | number | null>;
+}
+
 const REQUIRED_HEADERS = [
   "Curso",
   "No. Lista",
@@ -255,7 +266,7 @@ export default function Home() {
   const [timeResolution, setTimeResolution] = useState<"daily" | "monthly">("daily");
 
 
-  const [appMode, setAppMode] = useState<"observations" | "pendientes" | "calificaciones">("observations");
+  const [appMode, setAppMode] = useState<"observations" | "pendientes" | "calificaciones" | "panorama_riesgo">("observations");
   const [pendientes, setPendientes] = useState<PendienteItem[]>([]);
   const [pendientesSearch, setPendientesSearch] = useState("");
   const [pendientesFilter, setPendientesFilter] = useState<"all" | "firma" | "leccionario">("all");
@@ -274,6 +285,12 @@ export default function Home() {
   const [onlyShowAtRiskCalificaciones, setOnlyShowAtRiskCalificaciones] = useState<boolean>(false);
   const [calificacionesSearch, setCalificacionesSearch] = useState<string>("");
   const [excelExtraData, setExcelExtraData] = useState<ExcelExtraData | null>(null);
+
+  const [riesgoStudents, setRiesgoStudents] = useState<RiesgoStudent[]>([]);
+  const [riesgoHeaders, setRiesgoHeaders] = useState<string[]>([]);
+  const [panoramaActiveTab, setPanoramaActiveTab] = useState<"panorama" | "riesgo">("panorama");
+  const [riesgoSearch, setRiesgoSearch] = useState<string>("");
+  const [riesgoFilter, setRiesgoFilter] = useState<"all" | "average" | "attendance">("all");
 
   const resetAll = () => {
     setObservations([]);
@@ -296,6 +313,11 @@ export default function Home() {
     setOnlyShowAtRiskCalificaciones(false);
     setCalificacionesSearch("");
     setExcelExtraData(null);
+    setRiesgoStudents([]);
+    setRiesgoHeaders([]);
+    setPanoramaActiveTab("panorama");
+    setRiesgoSearch("");
+    setRiesgoFilter("all");
   };
 
   const promedioGeneralCurso = useMemo(() => {
@@ -393,6 +415,93 @@ export default function Home() {
       return matchesSearch && matchesSubject && matchesAtRisk;
     });
   }, [calificaciones, calificacionesSearch, selectedCalificacionesAsignatura, onlyShowAtRiskCalificaciones]);
+
+  const riesgoMetrics = useMemo(() => {
+    const totalRiesgo = riesgoStudents.length;
+
+    const validGrades = riesgoStudents.map(s => s.promedioGeneral).filter((g): g is number => g !== null && g > 0);
+    const avgGrade = validGrades.length > 0 ? validGrades.reduce((a, b) => a + b, 0) / validGrades.length : 0;
+
+    let totalAsist = 0;
+    let asistCount = 0;
+    let countLowAsist = 0;
+    let countLowGrade = 0;
+
+    riesgoStudents.forEach(s => {
+      if (s.promedioGeneral !== null && s.promedioGeneral < 4.0) {
+        countLowGrade++;
+      }
+
+      if (s.asistencia) {
+        const clean = s.asistencia.replace("%", "").trim();
+        const num = parseFloat(clean);
+        if (!isNaN(num)) {
+          totalAsist += num;
+          asistCount++;
+          if (num < 85) {
+            countLowAsist++;
+          }
+        }
+      }
+    });
+
+    const avgAsist = asistCount > 0 ? Math.round(totalAsist / asistCount) : 0;
+
+    return {
+      totalRiesgo,
+      avgGrade: parseFloat(avgGrade.toFixed(2)),
+      avgAsist,
+      countLowAsist,
+      countLowGrade,
+    };
+  }, [riesgoStudents]);
+
+  const filteredRiesgoStudents = useMemo(() => {
+    const term = riesgoSearch.trim().toLowerCase();
+    return riesgoStudents.filter(s => {
+      const matchesSearch = !term || s.estudiante.toLowerCase().includes(term);
+
+      let matchesFilter = true;
+      if (riesgoFilter === "average") {
+        matchesFilter = s.promedioGeneral !== null && s.promedioGeneral < 4.0;
+      } else if (riesgoFilter === "attendance") {
+        if (s.asistencia) {
+          const num = parseFloat(s.asistencia.replace("%", "").trim());
+          matchesFilter = !isNaN(num) && num < 85;
+        } else {
+          matchesFilter = false;
+        }
+      }
+
+      return matchesSearch && matchesFilter;
+    });
+  }, [riesgoStudents, riesgoSearch, riesgoFilter]);
+
+  const visibleRiesgoHeaders = useMemo(() => {
+    return riesgoHeaders
+      .filter(h => {
+        const lower = h.toLowerCase();
+        return !(
+          lower === "año" ||
+          lower.includes("tipo de enseñanza") ||
+          lower === "nivel educativo" ||
+          lower === "run" ||
+          lower.includes("dígito") ||
+          lower.includes("verificador") ||
+          lower.includes("apellido paterno") ||
+          lower.includes("apellido materno") ||
+          lower === "paterno" ||
+          lower === "materno"
+        );
+      })
+      .map(h => {
+        let display = h;
+        if (h.toLowerCase() === "nombres" || h.toLowerCase() === "nombre") {
+          display = "Estudiante";
+        }
+        return { original: h, display };
+      });
+  }, [riesgoHeaders]);
 
   const subjectColumnStats = useMemo(() => {
     let columns: { label: string, type: "grade" | "p1" | "p2" | "pf" | "p1_gen" | "p2_gen" | "pf_gen" }[] = [];
@@ -816,11 +925,13 @@ export default function Home() {
 
   const processSingleFile = useCallback((file: File): Promise<{
     fileName: string;
-    type: "observations" | "pendientes" | "calificaciones";
+    type: "observations" | "pendientes" | "calificaciones" | "panorama_riesgo";
     observationsData?: Observation[];
     pendientesData?: PendienteItem[];
     calificacionesData?: CalificacionStudent[];
     excelExtraData?: ExcelExtraData;
+    riesgoData?: RiesgoStudent[];
+    riesgoHeaders?: string[];
     error?: string;
   }> => {
     return new Promise((resolve) => {
@@ -891,11 +1002,19 @@ export default function Home() {
             const workbook = XLSX.read(data, { type: "array" });
 
             const firstSheetName = workbook.SheetNames[0];
+            const sheetNames = workbook.SheetNames;
+            const hasRiesgoSheet = sheetNames.some(
+              (name) =>
+                name.toLowerCase().includes("riesgo") &&
+                name.toLowerCase().includes("promoci")
+            );
+
+            let isPanoramaRiesgo = hasRiesgoSheet;
             let isPendientes = false;
             let isCalificaciones = false;
             let jsonGrid: unknown[][] = [];
 
-            if (firstSheetName) {
+            if (!isPanoramaRiesgo && firstSheetName) {
               const worksheet = workbook.Sheets[firstSheetName];
               jsonGrid = XLSX.utils.sheet_to_json<unknown[]>(worksheet, { header: 1, defval: "" });
 
@@ -920,7 +1039,7 @@ export default function Home() {
                 name.toLowerCase().includes("registro")
             );
 
-            if (!isCalificaciones) {
+            if (!isPanoramaRiesgo && !isCalificaciones) {
               if (hasPendientesSheetNames) {
                 isPendientes = true;
               } else if (jsonGrid.length > 0) {
@@ -929,7 +1048,343 @@ export default function Home() {
               }
             }
 
-            if (isCalificaciones) {
+            if (isPanoramaRiesgo) {
+              const firstSheet = workbook.Sheets[firstSheetName];
+              const grid1 = XLSX.utils.sheet_to_json<unknown[]>(firstSheet, { header: 1, defval: "" });
+
+              // Robust header row detection
+              let mainHeaderRowIdx1 = 4;
+              for (let r = 0; r < Math.min(5, grid1.length); r++) {
+                const row = grid1[r] || [];
+                const nonEmptyCount = row.filter(cell => String(cell || "").trim() !== "").length;
+                if (nonEmptyCount >= 4) {
+                  const hasEst = row.some(val => {
+                    const s = String(val || "").toLowerCase();
+                    return s.includes("estudiante") || s.includes("alumno") || s.includes("nombre") || s.includes("apellido");
+                  });
+                  if (hasEst) {
+                    mainHeaderRowIdx1 = r;
+                    break;
+                  }
+                }
+              }
+
+              const headersRow1 = grid1[mainHeaderRowIdx1] || [];
+              const subheadersRow1 = grid1[mainHeaderRowIdx1 + 1] || [];
+
+              const colInfo1 = headersRow1.map((h, cIdx) => ({
+                label: String(h || "").trim(),
+                colIndex: cIdx,
+              })).filter(c => c.label !== "");
+
+              let colLista1 = -1;
+              let colEstudiante1 = -1;
+              let colPaterno1 = -1;
+              let colMaterno1 = -1;
+              let colNombres1 = -1;
+              let colRun1 = -1;
+              let colDv1 = -1;
+              let colProm1 = -1;
+              let colPeriodo1_1 = -1;
+              let colPeriodo2_1 = -1;
+
+              colInfo1.forEach(c => {
+                const l = c.label.toLowerCase();
+                if (l.includes("lista") || l.includes("nº") || l.includes("n°")) {
+                  colLista1 = c.colIndex;
+                } else if (l.includes("paterno")) {
+                  colPaterno1 = c.colIndex;
+                } else if (l.includes("materno")) {
+                  colMaterno1 = c.colIndex;
+                } else if (l.includes("nombres") || l.includes("nombre")) {
+                  colNombres1 = c.colIndex;
+                } else if (l.includes("estudiante") || l.includes("alumno")) {
+                  colEstudiante1 = c.colIndex;
+                } else if (l.includes("run")) {
+                  colRun1 = c.colIndex;
+                } else if (l.includes("dv") || l.includes("dígito") || l.includes("verific")) {
+                  colDv1 = c.colIndex;
+                } else if (l.includes("promedio general") || l.includes("promediogeneral") || l.includes("promedio final") || l.includes("prom. gral")) {
+                  colProm1 = c.colIndex;
+                } else if (l.includes("periodo 1") || l.includes("periodo1") || l.includes("período 1")) {
+                  colPeriodo1_1 = c.colIndex;
+                } else if (l.includes("periodo 2") || l.includes("periodo2") || l.includes("período 2")) {
+                  colPeriodo2_1 = c.colIndex;
+                }
+              });
+
+              // Subjects matching with subheader P1, P2, PF lookup
+              const subjectCols1: {
+                subjectName: string;
+                p1ColIndex: number;
+                p2ColIndex: number;
+                pfColIndex: number;
+              }[] = [];
+              headersRow1.forEach((h, cIdx) => {
+                const label = String(h || "").trim();
+                if (!label) return;
+
+                const l = label.toLowerCase();
+                const isStudentDetail = cIdx === colLista1 || cIdx === colEstudiante1 || cIdx === colPaterno1 || cIdx === colMaterno1 || cIdx === colNombres1 || cIdx === colRun1 || cIdx === colDv1;
+                const isGeneralStat = l.includes("promedio") || l.includes("prom.") || l.includes("asistencia") || l.includes("situac") || l.includes("result") || l.includes("observ") || l.includes("periodo") || l.includes("año") || l.includes("tipo de enseñanza") || l.includes("nivel educativo") || l.includes("curso") || l.includes("días") || l.includes("asistido") || l.includes("ausente") || l.includes("justificado");
+
+                if (!isStudentDetail && !isGeneralStat) {
+                  let p1ColIndex = -1;
+                  let p2ColIndex = -1;
+                  let pfColIndex = cIdx;
+
+                  // Look ahead to find subheaders P1, P2, PF in the next rows of same block
+                  for (let k = cIdx; k < grid1[mainHeaderRowIdx1].length; k++) {
+                    if (k > cIdx && String(grid1[mainHeaderRowIdx1][k] || "").trim() !== "") {
+                      break; // next header block started
+                    }
+                    const sub = String(subheadersRow1[k] || "").trim().toLowerCase();
+                    if (sub === "p1") {
+                      p1ColIndex = k;
+                    } else if (sub === "p2") {
+                      p2ColIndex = k;
+                    } else if (sub === "pf" || sub === "promedio final" || sub === "final" || sub === "promedio") {
+                      pfColIndex = k;
+                    }
+                  }
+                  subjectCols1.push({
+                    subjectName: label,
+                    p1ColIndex,
+                    p2ColIndex,
+                    pfColIndex,
+                  });
+                }
+              });
+
+              const parsedPanoramaStudents: CalificacionStudent[] = [];
+
+              // Decide data starting row based on presence of subheaders
+              let startRow1 = mainHeaderRowIdx1 + 1;
+              const nextRow1 = grid1[mainHeaderRowIdx1 + 1] || [];
+              const hasSubheaders = nextRow1.some(val => {
+                const s = String(val || "").toLowerCase();
+                return s === "p1" || s === "p2" || s === "pf" || s === "promedio final";
+              });
+              if (hasSubheaders) {
+                startRow1 = mainHeaderRowIdx1 + 2;
+              }
+
+              for (let r = startRow1; r < grid1.length; r++) {
+                const row = grid1[r];
+                if (!row || row.length === 0) continue;
+
+                let nameVal = "";
+                if (colPaterno1 !== -1 || colMaterno1 !== -1 || colNombres1 !== -1) {
+                  const pat = colPaterno1 !== -1 ? String(row[colPaterno1] || "").trim() : "";
+                  const mat = colMaterno1 !== -1 ? String(row[colMaterno1] || "").trim() : "";
+                  const nom = colNombres1 !== -1 ? String(row[colNombres1] || "").trim() : "";
+                  nameVal = [pat, mat, nom].filter(Boolean).join(" ");
+                } else if (colEstudiante1 !== -1) {
+                  nameVal = String(row[colEstudiante1] || "").trim();
+                }
+
+                if (!nameVal) {
+                  const isRowEmpty = row.every(cell => String(cell || "").trim() === "");
+                  if (isRowEmpty) continue;
+                  const firstVal = String(row[0] || "").trim().toLowerCase();
+                  if (firstVal.startsWith("total") || firstVal.startsWith("promedio") || firstVal.startsWith("resumen")) {
+                    break;
+                  }
+                  continue;
+                }
+
+                const nameLower = nameVal.toLowerCase();
+                if (nameLower.startsWith("total") || nameLower.startsWith("promedio") || nameLower.startsWith("resumen")) {
+                  break;
+                }
+
+                const run = colRun1 !== -1 ? String(row[colRun1] || "").trim() : "";
+                const dv = colDv1 !== -1 ? String(row[colDv1] || "").trim() : "";
+                const listNum = colLista1 !== -1 ? String(row[colLista1] || "").trim() : String(r - startRow1 + 1);
+
+                const parseGrade = (val: unknown): number | null => {
+                  if (val === undefined || val === null || String(val).trim() === "" || String(val).trim() === "-") {
+                    return null;
+                  }
+                  const str = String(val).trim().replace(",", ".");
+                  const num = parseFloat(str);
+                  return isNaN(num) ? null : num;
+                };
+
+                const promedioGeneral = colProm1 !== -1 ? parseGrade(row[colProm1]) : null;
+                const p1General = colPeriodo1_1 !== -1 ? parseGrade(row[colPeriodo1_1]) : null;
+                const p2General = colPeriodo2_1 !== -1 ? parseGrade(row[colPeriodo2_1]) : null;
+
+                const subjects: CalificacionSubjectData[] = [];
+                subjectCols1.forEach(s => {
+                  const p1Val = s.p1ColIndex !== -1 ? parseGrade(row[s.p1ColIndex]) : null;
+                  const p2Val = s.p2ColIndex !== -1 ? parseGrade(row[s.p2ColIndex]) : null;
+                  const pfVal = parseGrade(row[s.pfColIndex]);
+                  subjects.push({
+                    subjectName: s.subjectName,
+                    grades: [],
+                    p1: p1Val,
+                    p2: p2Val,
+                    pf: pfVal,
+                  });
+                });
+
+                parsedPanoramaStudents.push({
+                  id: `panorama-${file.name}-${nameVal}-${r}`,
+                  lista: listNum,
+                  estudiante: capitalizeProperName(nameVal),
+                  run,
+                  dv,
+                  periodo1: p1General,
+                  periodo2: p2General,
+                  promedioGeneral,
+                  subjects,
+                });
+              }
+
+              const riesgoSheetName = workbook.SheetNames.find(
+                name => name.toLowerCase().includes("riesgo") && name.toLowerCase().includes("promoci")
+              );
+              let parsedRiesgoRows: RiesgoStudent[] = [];
+              let parsedRiesgoHeaders: string[] = [];
+
+              if (riesgoSheetName) {
+                const sheet = workbook.Sheets[riesgoSheetName];
+                const grid2 = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
+
+                let mainHeaderRowIdx2 = 7;
+                for (let r = 0; r < Math.min(8, grid2.length); r++) {
+                  const row = grid2[r] || [];
+                  const nonEmptyCount = row.filter(cell => String(cell || "").trim() !== "").length;
+                  if (nonEmptyCount >= 4) {
+                    const hasEst = row.some(val => {
+                      const s = String(val || "").toLowerCase();
+                      return s.includes("estudiante") || s.includes("alumno") || s.includes("nombre") || s.includes("apellido");
+                    });
+                    if (hasEst) {
+                      mainHeaderRowIdx2 = r;
+                      break;
+                    }
+                  }
+                }
+
+                const headersRow2 = grid2[mainHeaderRowIdx2] || [];
+                const colInfo2 = headersRow2.map((h, cIdx) => ({
+                  label: String(h || "").trim(),
+                  colIndex: cIdx,
+                })).filter(c => c.label !== "");
+
+                parsedRiesgoHeaders = colInfo2.map(c => c.label);
+
+                let colLista2 = -1;
+                let colEstudiante2 = -1;
+                let colPaterno2 = -1;
+                let colMaterno2 = -1;
+                let colNombres2 = -1;
+                let colRun2 = -1;
+                let colDv2 = -1;
+                let colProm2 = -1;
+                let colAsist2 = -1;
+
+                colInfo2.forEach(c => {
+                  const l = c.label.toLowerCase();
+                  if (l.includes("lista") || l.includes("nº") || l.includes("n°")) {
+                    colLista2 = c.colIndex;
+                  } else if (l.includes("paterno")) {
+                    colPaterno2 = c.colIndex;
+                  } else if (l.includes("materno")) {
+                    colMaterno2 = c.colIndex;
+                  } else if (l.includes("nombres") || l.includes("nombre")) {
+                    colNombres2 = c.colIndex;
+                  } else if (l.includes("estudiante") || l.includes("alumno")) {
+                    colEstudiante2 = c.colIndex;
+                  } else if (l.includes("run")) {
+                    colRun2 = c.colIndex;
+                  } else if (l.includes("dv") || l.includes("dígito") || l.includes("verific")) {
+                    colDv2 = c.colIndex;
+                  } else if (l.includes("promedio") || l.includes("prom")) {
+                    colProm2 = c.colIndex;
+                  } else if (l.includes("asistencia") || l.includes("asist")) {
+                    colAsist2 = c.colIndex;
+                  }
+                });
+
+                const startRow2 = mainHeaderRowIdx2 + 1;
+                for (let r = startRow2; r < grid2.length; r++) {
+                  const row = grid2[r];
+                  if (!row || row.length === 0) continue;
+
+                  let nameVal = "";
+                  if (colPaterno2 !== -1 || colMaterno2 !== -1 || colNombres2 !== -1) {
+                    const pat = colPaterno2 !== -1 ? String(row[colPaterno2] || "").trim() : "";
+                    const mat = colMaterno2 !== -1 ? String(row[colMaterno2] || "").trim() : "";
+                    const nom = colNombres2 !== -1 ? String(row[colNombres2] || "").trim() : "";
+                    nameVal = [pat, mat, nom].filter(Boolean).join(" ");
+                  } else if (colEstudiante2 !== -1) {
+                    nameVal = String(row[colEstudiante2] || "").trim();
+                  }
+
+                  if (!nameVal) {
+                    const isRowEmpty = row.every(cell => String(cell || "").trim() === "");
+                    if (isRowEmpty) continue;
+                    const firstVal = String(row[0] || "").trim().toLowerCase();
+                    if (firstVal.startsWith("total") || firstVal.startsWith("promedio") || firstVal.startsWith("resumen")) {
+                      break;
+                    }
+                    continue;
+                  }
+
+                  const nameLower = nameVal.toLowerCase();
+                  if (nameLower.startsWith("total") || nameLower.startsWith("promedio") || nameLower.startsWith("resumen")) {
+                    break;
+                  }
+
+                  const run = colRun2 !== -1 ? String(row[colRun2] || "").trim() : "";
+                  const dv = colDv2 !== -1 ? String(row[colDv2] || "").trim() : "";
+                  const listNum = colLista2 !== -1 ? String(row[colLista2] || "").trim() : String(r - startRow2 + 1);
+
+                  const parseGrade = (val: unknown): number | null => {
+                    if (val === undefined || val === null || String(val).trim() === "" || String(val).trim() === "-") {
+                      return null;
+                    }
+                    const str = String(val).trim().replace(",", ".");
+                    const num = parseFloat(str);
+                    return isNaN(num) ? null : num;
+                  };
+
+                  const promedioGeneral = colProm2 !== -1 ? parseGrade(row[colProm2]) : null;
+                  const asistencia = colAsist2 !== -1 ? String(row[colAsist2] || "").trim() : null;
+
+                  const dynamicFields: Record<string, string | number | null> = {};
+                  colInfo2.forEach(c => {
+                    dynamicFields[c.label] = String(row[c.colIndex] || "").trim();
+                  });
+
+                  parsedRiesgoRows.push({
+                    id: `riesgo-${file.name}-${nameVal}-${r}`,
+                    lista: listNum,
+                    estudiante: capitalizeProperName(nameVal),
+                    run,
+                    dv,
+                    promedioGeneral,
+                    asistencia,
+                    dynamicFields,
+                  });
+                }
+              }
+
+              if (parsedPanoramaStudents.length === 0) {
+                resolve({ fileName: file.name, type: "panorama_riesgo", error: "No se encontraron estudiantes en el panorama global." });
+              } else {
+                resolve({
+                  fileName: file.name,
+                  type: "panorama_riesgo",
+                  calificacionesData: parsedPanoramaStudents,
+                  riesgoData: parsedRiesgoRows,
+                  riesgoHeaders: parsedRiesgoHeaders,
+                });
+              }
+            } else if (isCalificaciones) {
               const headersRow1 = jsonGrid[0] || [];
               const headersRow2 = jsonGrid[1] || [];
               const headersRow3 = jsonGrid[2] || [];
@@ -1375,7 +1830,7 @@ export default function Home() {
       const firstType = results[0].type;
       const allSameType = results.every((r) => r.type === firstType);
       if (!allSameType) {
-        setErrorMessage("Todos los archivos cargados al mismo tiempo deben ser del mismo tipo (Firmas/Leccionarios, Observaciones o Calificaciones)");
+        setErrorMessage("Todos los archivos cargados al mismo tiempo deben ser del mismo tipo (Firmas/Leccionarios, Observaciones, Calificaciones o Panorama y Riesgo)");
         return;
       }
 
@@ -1423,6 +1878,28 @@ export default function Home() {
         setAppMode("calificaciones");
         setCalificaciones(mergedCalificaciones);
         setExcelExtraData(mergedExtraData);
+      } else if (firstType === "panorama_riesgo") {
+        const mergedCalificaciones: CalificacionStudent[] = [];
+        const mergedRiesgo: RiesgoStudent[] = [];
+        let finalRiesgoHeaders: string[] = [];
+
+        results.forEach((r) => {
+          if (r.calificacionesData) {
+            mergedCalificaciones.push(...r.calificacionesData);
+          }
+          if (r.riesgoData) {
+            mergedRiesgo.push(...r.riesgoData);
+          }
+          if (r.riesgoHeaders && r.riesgoHeaders.length > 0) {
+            finalRiesgoHeaders = r.riesgoHeaders;
+          }
+        });
+
+        setAppMode("panorama_riesgo");
+        setPanoramaActiveTab("panorama");
+        setCalificaciones(mergedCalificaciones);
+        setRiesgoStudents(mergedRiesgo);
+        setRiesgoHeaders(finalRiesgoHeaders);
       } else {
         const mergedPendientes: PendienteItem[] = [];
         results.forEach((r) => {
@@ -1527,9 +2004,28 @@ export default function Home() {
             <div>
               <h1 className="text-2xl font-semibold">Kimche Analyzer</h1>
               <p className="text-sm text-slate-500">
-                Carga tu Registro de firmas pendientes o el Registro de observaciones de tu curso (detección automática) y obtén estadísticas. El análisis se realiza de manera local, por lo que no se comparte ningún dato con nadie.
+                Carga las planillas que exportas desde Kimche y obtén estadísticas en un formato visual más amigable. El análisis se realiza de manera local, por lo que no se comparte ningún dato con nadie. La app puede procesar los siguientes tipos de planillas:
               </p>
             </div>
+          </div>
+
+          <div className="mb-6 flex flex-wrap gap-2.5 justify-center">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm">
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />
+              Observaciones
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Calificaciones
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200 shadow-sm">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              Registros pendientes
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200 shadow-sm">
+              <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+              Promedios y situación final
+            </span>
           </div>
 
           <label
@@ -1549,7 +2045,7 @@ export default function Home() {
             </div>
             <div>
               <p className="font-medium">Arrastra y suelta tu archivo aquí</p>
-              <p className="text-sm text-slate-500">Acepta CSV de observaciones y Excel (.xlsx, .xls) de calificaciones o pendientes</p>
+              <p className="text-sm text-slate-500">o haz clic para abrir el explorador de archivos</p>
             </div>
             <input
               type="file"
@@ -1832,7 +2328,7 @@ export default function Home() {
     );
   }
 
-  if (appMode === "calificaciones" && calificaciones.length > 0) {
+  if ((appMode === "calificaciones" || appMode === "panorama_riesgo") && calificaciones.length > 0) {
     const selectedSubObj = selectedCalificacionesAsignatura !== "all"
       ? calificaciones.find(s => s.subjects.some(sub => sub.subjectName === selectedCalificacionesAsignatura))
         ?.subjects.find(sub => sub.subjectName === selectedCalificacionesAsignatura)
@@ -1856,9 +2352,13 @@ export default function Home() {
         <div className="mx-auto flex max-w-7xl flex-col gap-6">
           <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-semibold">Registro de Calificaciones y Rendimiento</h1>
+              <h1 className="text-2xl font-semibold">
+                {appMode === "panorama_riesgo" ? "Visión del Curso y Riesgo de Promoción" : "Registro de Calificaciones y Rendimiento"}
+              </h1>
               <p className="mt-1 text-sm text-slate-500">
-                Visualiza y analiza el rendimiento general, promedios, aprobaciones y calificaciones por asignatura. Todo de forma local.
+                {appMode === "panorama_riesgo"
+                  ? "Visualiza la visión general del curso y detecta a los estudiantes en peligro de repitencia."
+                  : "Visualiza y analiza el rendimiento general, promedios, aprobaciones y calificaciones por asignatura. Todo de forma local."}
               </p>
             </div>
             <button
@@ -1869,574 +2369,834 @@ export default function Home() {
             </button>
           </header>
 
-          {/* Métricas del Curso */}
-          <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <article className="relative overflow-hidden rounded-xl bg-indigo-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
-              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
-              <div className="relative z-10">
-                <p className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Promedio General Curso</p>
-                <p className="text-3xl font-extrabold mt-1">{promedioGeneralCurso.toFixed(2)}</p>
-              </div>
-            </article>
-
-            <article className="relative overflow-hidden rounded-xl bg-emerald-605 px-4 py-4.5 text-white bg-emerald-600 shadow-sm transition hover:shadow-md">
-              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
-              <div className="relative z-10">
-                <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Tasa de Aprobación</p>
-                <p className="text-3xl font-extrabold mt-1">{tasaAprobacion}%</p>
-              </div>
-            </article>
-
-            <article className="relative overflow-hidden rounded-xl bg-blue-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
-              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
-              <div className="relative z-10">
-                <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">Total Alumnos</p>
-                <p className="text-3xl font-extrabold mt-1">{calificaciones.length}</p>
-              </div>
-            </article>
-
-            <article className="relative overflow-hidden rounded-xl bg-purple-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
-              <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
-              <div className="relative z-10">
-                <p className="text-xs font-semibold uppercase tracking-wider text-purple-100">Asignaturas Evaluadas</p>
-                <p className="text-3xl font-extrabold mt-1">{uniqueAsignaturasCalificaciones.length}</p>
-              </div>
-            </article>
-          </section>
-
-          {/* Gráficos */}
-          <section className="grid gap-6 lg:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="font-semibold text-slate-800 mb-4">Distribución de Promedios Generales</h3>
-              <div className="w-full flex items-center justify-center">
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={distributionData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                    <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
-                    <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
-                    <Tooltip cursor={{ fill: '#f8fafc' }} />
-                    <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                      {distributionData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+          {appMode === "panorama_riesgo" && (
+            <div className="flex border-b border-slate-200 bg-white p-2 rounded-2xl shadow-sm gap-2 print:hidden">
+              <button
+                onClick={() => setPanoramaActiveTab("panorama")}
+                className={`rounded-xl px-6 py-2.5 text-sm font-bold transition-all ${panoramaActiveTab === "panorama"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+                  }`}
+              >
+                Panorama Global
+              </button>
+              <button
+                onClick={() => setPanoramaActiveTab("riesgo")}
+                className={`rounded-xl px-6 py-2.5 text-sm font-bold transition-all ${panoramaActiveTab === "riesgo"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+                  }`}
+              >
+                Riesgo de Promoción ({riesgoStudents.length})
+              </button>
             </div>
+          )}
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h3 className="font-semibold text-slate-800 mb-4">Rendimiento Promedio por Asignatura</h3>
-              <div className="w-full flex items-center justify-center">
-                {subjectPerformanceData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height={240}>
-                    <BarChart data={subjectPerformanceData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                      <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
-                      <YAxis domain={[1.0, 7.0]} stroke="#64748b" fontSize={11} tickLine={false} />
-                      <Tooltip />
-                      <Bar dataKey="promedio" fill="#6366f1" radius={[6, 6, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-[240px] flex items-center justify-center text-slate-400 italic text-sm">
-                    No hay asignaturas con promedios válidos
+          {appMode !== "panorama_riesgo" || panoramaActiveTab === "panorama" ? (
+            <>
+              {/* Métricas del Curso */}
+              <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <article className="relative overflow-hidden rounded-xl bg-indigo-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+                  <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+                  <div className="relative z-10">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Promedio General Curso</p>
+                    <p className="text-3xl font-extrabold mt-1">{promedioGeneralCurso.toFixed(2)}</p>
                   </div>
-                )}
-              </div>
-            </div>
-          </section>
+                </article>
 
-          {/* Filtros e Historial */}
-          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                  <Filter className="h-4 w-4 text-indigo-500" />
-                  Panel de Filtros de Calificaciones
-                </h3>
-                {(selectedCalificacionesAsignatura !== "all" || onlyShowAtRiskCalificaciones || calificacionesSearch !== "") && (
-                  <button
-                    onClick={() => {
-                      setSelectedCalificacionesAsignatura("all");
-                      setOnlyShowAtRiskCalificaciones(false);
-                      setCalificacionesSearch("");
-                    }}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
-                  >
-                    Restablecer todos los filtros
-                  </button>
-                )}
-              </div>
+                <article className="relative overflow-hidden rounded-xl bg-emerald-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+                  <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+                  <div className="relative z-10">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-emerald-105">Tasa de Aprobación</p>
+                    <p className="text-3xl font-extrabold mt-1">{tasaAprobacion}%</p>
+                  </div>
+                </article>
 
-              <div className="grid gap-4 sm:grid-cols-3">
-                {/* 1. Búsqueda por Estudiante */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                    Buscar Alumno
-                  </label>
-                  <div className="relative">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <input
-                      value={calificacionesSearch}
-                      onChange={(e) => setCalificacionesSearch(e.target.value)}
-                      placeholder="Nombre estudiante..."
-                      className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs outline-none ring-indigo-500 transition focus:ring"
-                    />
+                <article className="relative overflow-hidden rounded-xl bg-blue-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+                  <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+                  <div className="relative z-10">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-blue-101">Total Alumnos</p>
+                    <p className="text-3xl font-extrabold mt-1">{calificaciones.length}</p>
+                  </div>
+                </article>
+
+                <article className="relative overflow-hidden rounded-xl bg-purple-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+                  <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+                  <div className="relative z-10">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-purple-101">Asignaturas Evaluadas</p>
+                    <p className="text-3xl font-extrabold mt-1">{uniqueAsignaturasCalificaciones.length}</p>
+                  </div>
+                </article>
+              </section>
+
+              {/* Gráficos */}
+              <section className="grid gap-6 lg:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="font-semibold text-slate-800 mb-4">Distribución de Promedios Generales</h3>
+                  <div className="w-full flex items-center justify-center">
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart data={distributionData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                        <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                        <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
+                        <Tooltip cursor={{ fill: '#f8fafc' }} />
+                        <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                          {distributionData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
 
-                {/* 2. Filtro por Asignatura */}
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                    Ver Asignatura
-                  </label>
-                  <select
-                    value={selectedCalificacionesAsignatura}
-                    onChange={(e) => setSelectedCalificacionesAsignatura(e.target.value)}
-                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
-                  >
-                    <option value="all">Promedios Generales (Todos)</option>
-                    {uniqueAsignaturasCalificaciones.map((subj) => (
-                      <option key={subj} value={subj}>
-                        {subj}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 3. Filtro Alumnos en Riesgo */}
-                <div className="flex flex-col justify-end pb-1.5">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 select-none">
-                    <input
-                      type="checkbox"
-                      checked={onlyShowAtRiskCalificaciones}
-                      onChange={(e) => setOnlyShowAtRiskCalificaciones(e.target.checked)}
-                      className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500"
-                    />
-                    <span>Mostrar solo estudiantes en riesgo (&lt; 4.0)</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            {/* Tabla de Resultados */}
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-medium">
-                    <th className="px-3 py-3 w-16 text-center font-bold">Nº</th>
-                    <th className="px-4 py-3 min-w-[200px] font-bold">Estudiante</th>
-
-                    {/* Dynamic Header Columns for subject-specific view */}
-                    {selectedCalificacionesAsignatura !== "all" ? (
-                      <>
-                        {gradeHeaders.map((grade, gIdx) => (
-                          <th key={gIdx} className="px-2 py-3 text-center min-w-[70px]">
-                            <div className="font-bold">{grade.label}</div>
-                            {grade.weight && (
-                              <div className="text-[10px] text-slate-400 font-normal">{grade.weight}</div>
-                            )}
-                          </th>
-                        ))}
-                        <th className="px-3 py-3 text-center font-bold min-w-[70px]">P1</th>
-                        <th className="px-3 py-3 text-center font-bold min-w-[70px]">P2</th>
-                        <th className="px-3 py-3 text-center font-bold min-w-[70px]">PF</th>
-                      </>
+                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                  <h3 className="font-semibold text-slate-800 mb-4">Rendimiento Promedio por Asignatura</h3>
+                  <div className="w-full flex items-center justify-center">
+                    {subjectPerformanceData.length > 0 ? (
+                      <ResponsiveContainer width="100%" height={240}>
+                        <BarChart data={subjectPerformanceData}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                          <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                          <YAxis domain={[1.0, 7.0]} stroke="#64748b" fontSize={11} tickLine={false} />
+                          <Tooltip />
+                          <Bar dataKey="promedio" fill="#6366f1" radius={[6, 6, 0, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
                     ) : (
-                      <>
-                        <th className="px-4 py-3 text-center font-bold min-w-[100px]">P1 General</th>
-                        <th className="px-4 py-3 text-center font-bold min-w-[100px]">P2 General</th>
-                        <th className="px-4 py-3 text-center font-bold min-w-[120px]">Promedio General</th>
-                      </>
+                      <div className="h-[240px] flex items-center justify-center text-slate-400 italic text-sm">
+                        No hay asignaturas con promedios válidos
+                      </div>
                     )}
+                  </div>
+                </div>
+              </section>
 
-                    <th className="px-4 py-3 text-center font-bold min-w-[100px]">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCalificaciones.length > 0 ? (
-                    filteredCalificaciones.map((student) => {
-                      // Get stats based on selected subject vs all subjects
-                      let finalGrade: number | null = null;
-                      let p1Value: number | null = null;
-                      let p2Value: number | null = null;
-                      let studentGrades: GradeItem[] = [];
+              {/* Filtros e Historial */}
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                      <Filter className="h-4 w-4 text-indigo-500" />
+                      Panel de Filtros de Calificaciones
+                    </h3>
+                    {(selectedCalificacionesAsignatura !== "all" || onlyShowAtRiskCalificaciones || calificacionesSearch !== "") && (
+                      <button
+                        onClick={() => {
+                          setSelectedCalificacionesAsignatura("all");
+                          setOnlyShowAtRiskCalificaciones(false);
+                          setCalificacionesSearch("");
+                        }}
+                        className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold underline cursor-pointer"
+                      >
+                        Restablecer todos los filtros
+                      </button>
+                    )}
+                  </div>
 
-                      if (selectedCalificacionesAsignatura !== "all") {
-                        const studentSub = student.subjects.find(s => s.subjectName === selectedCalificacionesAsignatura);
-                        if (studentSub) {
-                          finalGrade = studentSub.pf;
-                          p1Value = studentSub.p1;
-                          p2Value = studentSub.p2;
-                          studentGrades = studentSub.grades;
-                        }
-                      } else {
-                        finalGrade = student.promedioGeneral;
-                        p1Value = student.periodo1;
-                        p2Value = student.periodo2;
-                      }
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    {/* 1. Búsqueda por Estudiante */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                        Buscar Alumno
+                      </label>
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                          value={calificacionesSearch}
+                          onChange={(e) => setCalificacionesSearch(e.target.value)}
+                          placeholder="Nombre estudiante..."
+                          className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs outline-none ring-indigo-500 transition focus:ring"
+                        />
+                      </div>
+                    </div>
 
-                      const isApproved = finalGrade !== null && finalGrade >= 4.0;
-                      const hasGrade = finalGrade !== null && finalGrade > 0;
+                    {/* 2. Filtro por Asignatura */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                        Ver Asignatura
+                      </label>
+                      <select
+                        value={selectedCalificacionesAsignatura}
+                        onChange={(e) => setSelectedCalificacionesAsignatura(e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-indigo-500 focus:ring cursor-pointer"
+                      >
+                        <option value="all">Promedios Generales (Todos)</option>
+                        {uniqueAsignaturasCalificaciones.map((subj) => (
+                          <option key={subj} value={subj}>
+                            {subj}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                      const getGradeClass = (gradeVal: number | null) => {
-                        if (gradeVal === null || gradeVal === 0) return "text-slate-400";
-                        if (gradeVal < 4.0) return "text-rose-600 font-extrabold";
-                        if (gradeVal >= 6.0) return "text-emerald-600 font-bold";
-                        return "text-slate-800 font-semibold";
-                      };
+                    {/* 3. Filtro Alumnos en Riesgo */}
+                    <div className="flex flex-col justify-end pb-1.5">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700 select-none">
+                        <input
+                          type="checkbox"
+                          checked={onlyShowAtRiskCalificaciones}
+                          onChange={(e) => setOnlyShowAtRiskCalificaciones(e.target.checked)}
+                          className="h-4 w-4 rounded border-slate-300 text-indigo-650 focus:ring-indigo-500"
+                        />
+                        <span>Mostrar solo estudiantes en riesgo (&lt; 4.0)</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
 
-                      return (
-                        <tr key={student.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
-                          <td className="px-3 py-3.5 text-center text-slate-500 whitespace-nowrap font-medium">
-                            {student.lista}
-                          </td>
-                          <td className="px-4 py-3.5 font-bold text-slate-800 whitespace-nowrap">
-                            {student.estudiante}
-                          </td>
+                {/* Tabla de Resultados */}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm border-collapse table-fixed">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                        <th className="px-3 py-3 w-16 min-w-[64px] text-center font-bold">Nº</th>
+                        <th className="px-4 py-3 w-[300px] min-w-[200px] font-bold">Estudiante</th>
 
-                          {selectedCalificacionesAsignatura !== "all" ? (
+                        {/* Dynamic Header Columns for subject-specific view */}
+                        {selectedCalificacionesAsignatura !== "all" ? (
+                          appMode === "panorama_riesgo" ? (
                             <>
-                              {/* Render individual grades for subject */}
-                              {gradeHeaders.map((header, gIdx) => {
-                                const matchedGrade = studentGrades.find(g => g.label === header.label);
-                                const gValue = matchedGrade ? matchedGrade.value : null;
-                                return (
-                                  <td key={gIdx} className={`px-2 py-3.5 text-center whitespace-nowrap ${getGradeClass(gValue)}`}>
-                                    {gValue !== null ? gValue.toFixed(1).replace(".", ",") : "-"}
-                                  </td>
-                                );
-                              })}
-
-                              <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(p1Value)}`}>
-                                {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
-                              </td>
-                              <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(p2Value)}`}>
-                                {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
-                              </td>
-                              <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(finalGrade)} bg-slate-50/40`}>
-                                {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
-                              </td>
+                              <th className="px-3 py-3 text-center font-bold w-24 min-w-[96px]">P1</th>
+                              <th className="px-3 py-3 text-center font-bold w-24 min-w-[96px]">P2</th>
+                              <th className="px-3 py-3 text-center font-bold w-24 min-w-[96px]">PF</th>
                             </>
                           ) : (
                             <>
-                              <td className={`px-4 py-3.5 text-center whitespace-nowrap ${getGradeClass(p1Value)}`}>
-                                {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
+                              {gradeHeaders.map((grade, gIdx) => (
+                                <th key={gIdx} className="px-2 py-3 text-center w-20 min-w-[80px]">
+                                  <div className="font-bold">{grade.label}</div>
+                                  {grade.weight && (
+                                    <div className="text-[10px] text-slate-400 font-normal">{grade.weight}</div>
+                                  )}
+                                </th>
+                              ))}
+                              <th className="px-3 py-3 text-center font-bold w-24 min-w-[96px]">P1</th>
+                              <th className="px-3 py-3 text-center font-bold w-24 min-w-[96px]">P2</th>
+                              <th className="px-3 py-3 text-center font-bold w-24 min-w-[96px]">PF</th>
+                            </>
+                          )
+                        ) : (
+                          <>
+                            <th className="px-4 py-3 text-center font-bold w-36 min-w-[144px]">P1 General</th>
+                            <th className="px-4 py-3 text-center font-bold w-36 min-w-[144px]">P2 General</th>
+                            <th className="px-4 py-3 text-center font-bold w-40 min-w-[160px]">Promedio General</th>
+                          </>
+                        )}
+
+                        <th className="px-4 py-3 text-center font-bold w-36 min-w-[144px]">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCalificaciones.length > 0 ? (
+                        filteredCalificaciones.map((student) => {
+                          let finalGrade: number | null = null;
+                          let p1Value: number | null = null;
+                          let p2Value: number | null = null;
+                          let studentGrades: GradeItem[] = [];
+
+                          if (selectedCalificacionesAsignatura !== "all") {
+                            const studentSub = student.subjects.find(s => s.subjectName === selectedCalificacionesAsignatura);
+                            if (studentSub) {
+                              finalGrade = studentSub.pf;
+                              p1Value = studentSub.p1;
+                              p2Value = studentSub.p2;
+                              studentGrades = studentSub.grades;
+                            }
+                          } else {
+                            finalGrade = student.promedioGeneral;
+                            p1Value = student.periodo1;
+                            p2Value = student.periodo2;
+                          }
+
+                          const isApproved = finalGrade !== null && finalGrade >= 4.0;
+                          const hasGrade = finalGrade !== null && finalGrade > 0;
+
+                          const getGradeClass = (gradeVal: number | null) => {
+                            if (gradeVal === null || gradeVal === 0) return "text-slate-400";
+                            if (gradeVal < 4.0) return "text-rose-600 font-extrabold";
+                            if (gradeVal >= 6.0) return "text-emerald-600 font-bold";
+                            return "text-slate-800 font-semibold";
+                          };
+
+                          return (
+                            <tr key={student.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                              <td className="px-3 py-3.5 text-center text-slate-500 whitespace-nowrap font-medium">
+                                {student.lista}
                               </td>
-                              <td className={`px-4 py-3.5 text-center whitespace-nowrap ${getGradeClass(p2Value)}`}>
-                                {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
+                              <td className="px-4 py-3.5 font-bold text-slate-800 whitespace-nowrap">
+                                {student.estudiante}
                               </td>
-                              <td className={`px-4 py-3.5 text-center whitespace-nowrap ${getGradeClass(finalGrade)} bg-indigo-50/10`}>
-                                {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
+
+                              {selectedCalificacionesAsignatura !== "all" ? (
+                                appMode === "panorama_riesgo" ? (
+                                  <>
+                                    <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(p1Value)}`}>
+                                      {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
+                                    </td>
+                                    <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(p2Value)}`}>
+                                      {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
+                                    </td>
+                                    <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(finalGrade)} bg-slate-50/40`}>
+                                      {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
+                                    </td>
+                                  </>
+                                ) : (
+                                  <>
+                                    {/* Render individual grades for subject */}
+                                    {gradeHeaders.map((header, gIdx) => {
+                                      const matchedGrade = studentGrades.find(g => g.label === header.label);
+                                      const gValue = matchedGrade ? matchedGrade.value : null;
+                                      return (
+                                        <td key={gIdx} className={`px-2 py-3.5 text-center whitespace-nowrap ${getGradeClass(gValue)}`}>
+                                          {gValue !== null ? gValue.toFixed(1).replace(".", ",") : "-"}
+                                        </td>
+                                      );
+                                    })}
+
+                                    <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(p1Value)}`}>
+                                      {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
+                                    </td>
+                                    <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(p2Value)}`}>
+                                      {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
+                                    </td>
+                                    <td className={`px-3 py-3.5 text-center whitespace-nowrap ${getGradeClass(finalGrade)} bg-slate-50/40`}>
+                                      {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
+                                    </td>
+                                  </>
+                                )
+                              ) : (
+                                <>
+                                  <td className={`px-4 py-3.5 text-center whitespace-nowrap ${getGradeClass(p1Value)}`}>
+                                    {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
+                                  </td>
+                                  <td className={`px-4 py-3.5 text-center whitespace-nowrap ${getGradeClass(p2Value)}`}>
+                                    {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
+                                  </td>
+                                  <td className={`px-4 py-3.5 text-center whitespace-nowrap ${getGradeClass(finalGrade)} bg-indigo-50/10`}>
+                                    {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
+                                  </td>
+                                </>
+                              )}
+
+                              <td className="px-4 py-3.5 text-center whitespace-nowrap">
+                                {hasGrade ? (
+                                  <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${isApproved
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-rose-100 text-rose-800"
+                                    }`}>
+                                    {isApproved ? "Aprobado" : "Reprobado"}
+                                  </span>
+                                ) : (
+                                  <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-medium bg-slate-100 text-slate-500">
+                                    Sin Nota
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={selectedCalificacionesAsignatura !== "all" ? (appMode === "panorama_riesgo" ? 6 : 5 + gradeHeaders.length) : 6} className="text-center py-12 text-slate-400 italic">
+                            No se encontraron estudiantes que coincidan con los filtros.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                    {subjectColumnStats && (
+                      <tfoot className="border-t-2 border-slate-300 bg-slate-50 font-semibold text-slate-800">
+                        {/* Row 1: Promedio */}
+                        <tr>
+                          <td className="px-3 py-2.5 text-center whitespace-nowrap text-slate-400 font-bold">-</td>
+                          <td className="px-4 py-2.5 whitespace-nowrap font-bold text-slate-800">Promedio Curso</td>
+                          {selectedCalificacionesAsignatura !== "all" ? (
+                            appMode === "panorama_riesgo" ? (
+                              <>
+                                <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                                  {subjectColumnStats["P1"]?.promedio !== null ? subjectColumnStats["P1"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                                  {subjectColumnStats["P2"]?.promedio !== null ? subjectColumnStats["P2"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-indigo-800 bg-indigo-50">
+                                  {subjectColumnStats["PF"]?.promedio !== null ? subjectColumnStats["PF"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                {gradeHeaders.map((header, gIdx) => {
+                                  const stat = subjectColumnStats[header.label];
+                                  const val = stat ? stat.promedio : null;
+                                  return (
+                                    <td key={`promedio-${gIdx}`} className="px-2 py-2.5 text-center whitespace-nowrap font-bold text-indigo-700">
+                                      {val !== null ? val.toFixed(1).replace(".", ",") : "-"}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                                  {subjectColumnStats["P1"]?.promedio !== null ? subjectColumnStats["P1"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                                  {subjectColumnStats["P2"]?.promedio !== null ? subjectColumnStats["P2"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-indigo-800 bg-indigo-50">
+                                  {subjectColumnStats["PF"]?.promedio !== null ? subjectColumnStats["PF"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                              </>
+                            )
+                          ) : (
+                            <>
+                              <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                                {subjectColumnStats["P1 General"]?.promedio !== null ? subjectColumnStats["P1 General"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
+                                {subjectColumnStats["P2 General"]?.promedio !== null ? subjectColumnStats["P2 General"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-indigo-800 bg-indigo-50">
+                                {subjectColumnStats["Promedio General"]?.promedio !== null ? subjectColumnStats["Promedio General"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
                               </td>
                             </>
                           )}
-
-                          <td className="px-4 py-3.5 text-center whitespace-nowrap">
-                            {hasGrade ? (
-                              <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-bold ${isApproved
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : "bg-rose-100 text-rose-800"
-                                }`}>
-                                {isApproved ? "Aprobado" : "Reprobado"}
-                              </span>
-                            ) : (
-                              <span className="inline-block rounded-full px-2.5 py-0.5 text-xs font-medium bg-slate-100 text-slate-500">
-                                Sin Nota
-                              </span>
-                            )}
-                          </td>
+                          <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-slate-400">-</td>
                         </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={selectedCalificacionesAsignatura !== "all" ? 5 + gradeHeaders.length : 6} className="text-center py-12 text-slate-400 italic">
-                        No se encontraron estudiantes que coincidan con los filtros.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-                {subjectColumnStats && (
-                  <tfoot className="border-t-2 border-slate-300 bg-slate-50 font-semibold text-slate-800">
-                    {/* Row 1: Promedio */}
-                    <tr>
-                      <td className="px-3 py-2.5 text-center whitespace-nowrap text-slate-400 font-bold">-</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap font-bold text-slate-800">Promedio Curso</td>
-                      {selectedCalificacionesAsignatura !== "all" ? (
-                        <>
-                          {gradeHeaders.map((header, gIdx) => {
-                            const stat = subjectColumnStats[header.label];
-                            const val = stat ? stat.promedio : null;
-                            return (
-                              <td key={`promedio-${gIdx}`} className="px-2 py-2.5 text-center whitespace-nowrap font-bold text-indigo-700">
-                                {val !== null ? val.toFixed(1).replace(".", ",") : "-"}
+
+                        {/* Row 2: Desviación Estándar */}
+                        <tr className="text-slate-600 bg-slate-50/70 border-t border-slate-200">
+                          <td className="px-3 py-2 text-center whitespace-nowrap text-slate-400 font-normal">-</td>
+                          <td className="px-4 py-2 whitespace-nowrap font-medium text-slate-600 text-xs">Desviación Estándar</td>
+                          {selectedCalificacionesAsignatura !== "all" ? (
+                            appMode === "panorama_riesgo" ? (
+                              <>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                                  {subjectColumnStats["P1"]?.desviacion !== null ? subjectColumnStats["P1"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                                  {subjectColumnStats["P2"]?.desviacion !== null ? subjectColumnStats["P2"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-slate-700 bg-indigo-50/40 text-xs">
+                                  {subjectColumnStats["PF"]?.desviacion !== null ? subjectColumnStats["PF"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                {gradeHeaders.map((header, gIdx) => {
+                                  const stat = subjectColumnStats[header.label];
+                                  const val = stat ? stat.desviacion : null;
+                                  return (
+                                    <td key={`desv-${gIdx}`} className="px-2 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                                      {val !== null ? val.toFixed(2).replace(".", ",") : "-"}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                                  {subjectColumnStats["P1"]?.desviacion !== null ? subjectColumnStats["P1"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                                  {subjectColumnStats["P2"]?.desviacion !== null ? subjectColumnStats["P2"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-slate-700 bg-indigo-50/40 text-xs">
+                                  {subjectColumnStats["PF"]?.desviacion !== null ? subjectColumnStats["PF"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
+                                </td>
+                              </>
+                            )
+                          ) : (
+                            <>
+                              <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                                {subjectColumnStats["P1 General"]?.desviacion !== null ? subjectColumnStats["P1 General"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
                               </td>
-                            );
-                          })}
-                          <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
-                            {subjectColumnStats["P1"]?.promedio !== null ? subjectColumnStats["P1"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
-                            {subjectColumnStats["P2"]?.promedio !== null ? subjectColumnStats["P2"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-3 py-2.5 text-center whitespace-nowrap font-bold text-indigo-800 bg-indigo-50">
-                            {subjectColumnStats["PF"]?.promedio !== null ? subjectColumnStats["PF"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
-                            {subjectColumnStats["P1 General"]?.promedio !== null ? subjectColumnStats["P1 General"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-slate-800">
-                            {subjectColumnStats["P2 General"]?.promedio !== null ? subjectColumnStats["P2 General"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-indigo-800 bg-indigo-50">
-                            {subjectColumnStats["Promedio General"]?.promedio !== null ? subjectColumnStats["Promedio General"]?.promedio?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                        </>
-                      )}
-                      <td className="px-4 py-2.5 text-center whitespace-nowrap font-bold text-slate-400">-</td>
-                    </tr>
-
-                    {/* Row 2: Desviación Estándar */}
-                    <tr className="text-slate-600 bg-slate-50/70 border-t border-slate-200">
-                      <td className="px-3 py-2 text-center whitespace-nowrap text-slate-400 font-normal">-</td>
-                      <td className="px-4 py-2 whitespace-nowrap font-medium text-slate-600 text-xs">Desviación Estándar</td>
-                      {selectedCalificacionesAsignatura !== "all" ? (
-                        <>
-                          {gradeHeaders.map((header, gIdx) => {
-                            const stat = subjectColumnStats[header.label];
-                            const val = stat ? stat.desviacion : null;
-                            return (
-                              <td key={`desv-${gIdx}`} className="px-2 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
-                                {val !== null ? val.toFixed(2).replace(".", ",") : "-"}
+                              <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
+                                {subjectColumnStats["P2 General"]?.desviacion !== null ? subjectColumnStats["P2 General"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
                               </td>
-                            );
-                          })}
-                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
-                            {subjectColumnStats["P1"]?.desviacion !== null ? subjectColumnStats["P1"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
-                            {subjectColumnStats["P2"]?.desviacion !== null ? subjectColumnStats["P2"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-slate-700 bg-indigo-50/40 text-xs">
-                            {subjectColumnStats["PF"]?.desviacion !== null ? subjectColumnStats["PF"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
-                            {subjectColumnStats["P1 General"]?.desviacion !== null ? subjectColumnStats["P1 General"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-slate-600 text-xs">
-                            {subjectColumnStats["P2 General"]?.desviacion !== null ? subjectColumnStats["P2 General"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-4 py-2 text-center whitespace-nowrap font-semibold text-slate-700 bg-indigo-50/40 text-xs">
-                            {subjectColumnStats["Promedio General"]?.desviacion !== null ? subjectColumnStats["Promedio General"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
-                          </td>
-                        </>
-                      )}
-                      <td className="px-4 py-2 text-center whitespace-nowrap font-normal text-slate-400">-</td>
-                    </tr>
-
-                    {/* Row 3: Mínimo */}
-                    <tr className="text-slate-600 bg-slate-50/70 border-t border-slate-200">
-                      <td className="px-3 py-2 text-center whitespace-nowrap text-slate-400 font-normal">-</td>
-                      <td className="px-4 py-2 whitespace-nowrap font-medium text-slate-600 text-xs">Nota Mínima</td>
-                      {selectedCalificacionesAsignatura !== "all" ? (
-                        <>
-                          {gradeHeaders.map((header, gIdx) => {
-                            const stat = subjectColumnStats[header.label];
-                            const val = stat ? stat.minimo : null;
-                            return (
-                              <td key={`min-${gIdx}`} className="px-2 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
-                                {val !== null ? val.toFixed(1).replace(".", ",") : "-"}
+                              <td className="px-4 py-2 text-center whitespace-nowrap font-semibold text-slate-700 bg-indigo-50/40 text-xs">
+                                {subjectColumnStats["Promedio General"]?.desviacion !== null ? subjectColumnStats["Promedio General"]?.desviacion?.toFixed(2).replace(".", ",") : "-"}
                               </td>
-                            );
-                          })}
-                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
-                            {subjectColumnStats["P1"]?.minimo !== null ? subjectColumnStats["P1"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
-                            {subjectColumnStats["P2"]?.minimo !== null ? subjectColumnStats["P2"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-rose-700 bg-indigo-50/40 text-xs">
-                            {subjectColumnStats["PF"]?.minimo !== null ? subjectColumnStats["PF"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
-                            {subjectColumnStats["P1 General"]?.minimo !== null ? subjectColumnStats["P1 General"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
-                            {subjectColumnStats["P2 General"]?.minimo !== null ? subjectColumnStats["P2 General"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-4 py-2 text-center whitespace-nowrap font-semibold text-rose-700 bg-indigo-50/40 text-xs">
-                            {subjectColumnStats["Promedio General"]?.minimo !== null ? subjectColumnStats["Promedio General"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                        </>
-                      )}
-                      <td className="px-4 py-2 text-center whitespace-nowrap font-normal text-slate-400">-</td>
-                    </tr>
+                            </>
+                          )}
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-normal text-slate-400">-</td>
+                        </tr>
 
-                    {/* Row 4: Máximo */}
-                    <tr className="text-slate-600 bg-slate-50/70 border-t border-slate-200">
-                      <td className="px-3 py-2 text-center whitespace-nowrap text-slate-400 font-normal">-</td>
-                      <td className="px-4 py-2 whitespace-nowrap font-medium text-slate-600 text-xs">Nota Máxima</td>
-                      {selectedCalificacionesAsignatura !== "all" ? (
-                        <>
-                          {gradeHeaders.map((header, gIdx) => {
-                            const stat = subjectColumnStats[header.label];
-                            const val = stat ? stat.maximo : null;
-                            return (
-                              <td key={`max-${gIdx}`} className="px-2 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
-                                {val !== null ? val.toFixed(1).replace(".", ",") : "-"}
+                        {/* Row 3: Mínimo */}
+                        <tr className="text-slate-600 bg-slate-50/70 border-t border-slate-200">
+                          <td className="px-3 py-2 text-center whitespace-nowrap text-slate-400 font-normal">-</td>
+                          <td className="px-4 py-2 whitespace-nowrap font-medium text-slate-600 text-xs">Nota Mínima</td>
+                          {selectedCalificacionesAsignatura !== "all" ? (
+                            appMode === "panorama_riesgo" ? (
+                              <>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                                  {subjectColumnStats["P1"]?.minimo !== null ? subjectColumnStats["P1"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                                  {subjectColumnStats["P2"]?.minimo !== null ? subjectColumnStats["P2"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-rose-700 bg-indigo-50/40 text-xs">
+                                  {subjectColumnStats["PF"]?.minimo !== null ? subjectColumnStats["PF"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                {gradeHeaders.map((header, gIdx) => {
+                                  const stat = subjectColumnStats[header.label];
+                                  const val = stat ? stat.minimo : null;
+                                  return (
+                                    <td key={`min-${gIdx}`} className="px-2 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                                      {val !== null ? val.toFixed(1).replace(".", ",") : "-"}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                                  {subjectColumnStats["P1"]?.minimo !== null ? subjectColumnStats["P1"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                                  {subjectColumnStats["P2"]?.minimo !== null ? subjectColumnStats["P2"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-rose-700 bg-indigo-50/40 text-xs">
+                                  {subjectColumnStats["PF"]?.minimo !== null ? subjectColumnStats["PF"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                              </>
+                            )
+                          ) : (
+                            <>
+                              <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                                {subjectColumnStats["P1 General"]?.minimo !== null ? subjectColumnStats["P1 General"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
                               </td>
-                            );
-                          })}
-                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
-                            {subjectColumnStats["P1"]?.maximo !== null ? subjectColumnStats["P1"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
-                            {subjectColumnStats["P2"]?.maximo !== null ? subjectColumnStats["P2"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-emerald-700 bg-indigo-50/40 text-xs">
-                            {subjectColumnStats["PF"]?.maximo !== null ? subjectColumnStats["PF"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
-                            {subjectColumnStats["P1 General"]?.maximo !== null ? subjectColumnStats["P1 General"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
-                            {subjectColumnStats["P2 General"]?.maximo !== null ? subjectColumnStats["P2 General"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                          <td className="px-4 py-2 text-center whitespace-nowrap font-semibold text-emerald-700 bg-indigo-50/40 text-xs">
-                            {subjectColumnStats["Promedio General"]?.maximo !== null ? subjectColumnStats["Promedio General"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
-                          </td>
-                        </>
-                      )}
-                      <td className="px-4 py-2 text-center whitespace-nowrap font-normal text-slate-400">-</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </section>
+                              <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-rose-600 text-xs">
+                                {subjectColumnStats["P2 General"]?.minimo !== null ? subjectColumnStats["P2 General"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className="px-4 py-2 text-center whitespace-nowrap font-semibold text-rose-700 bg-indigo-50/40 text-xs">
+                                {subjectColumnStats["Promedio General"]?.minimo !== null ? subjectColumnStats["Promedio General"]?.minimo?.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                            </>
+                          )}
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-normal text-slate-400">-</td>
+                        </tr>
 
-          {/* Card: Datos de Referencia y Leyendas */}
-          {excelExtraData && (
-            <section className="grid gap-6 md:grid-cols-2 print:hidden">
-              {/* Categorías Académicas */}
-              {excelExtraData.categorias.length > 0 && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <h3 className="font-semibold text-slate-800 flex items-center gap-2 mb-4">
-                    <Info className="h-5 w-5 text-indigo-500" />
-                    Categorías Académicas (Reporte Excel)
-                  </h3>
-                  {(() => {
-                    const categoriesToShow = excelExtraData.categorias.map(cat => {
-                      const val = getExcelCategoryVal(
-                        cat.label,
-                        selectedCalificacionesAsignatura !== "all" ? "pf" : "pf_gen",
-                        selectedCalificacionesAsignatura !== "all" ? selectedCalificacionesAsignatura : undefined
-                      );
-                      return {
-                        label: cat.label,
-                        value: val !== null ? Number(val) : 0,
-                      };
-                    }).filter(c => !isNaN(c.value) && c.value > 0);
+                        {/* Row 4: Máximo */}
+                        <tr className="text-slate-600 bg-slate-50/70 border-t border-slate-200">
+                          <td className="px-3 py-2 text-center whitespace-nowrap text-slate-400 font-normal">-</td>
+                          <td className="px-4 py-2 whitespace-nowrap font-medium text-slate-600 text-xs">Nota Máxima</td>
+                          {selectedCalificacionesAsignatura !== "all" ? (
+                            appMode === "panorama_riesgo" ? (
+                              <>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                                  {subjectColumnStats["P1"]?.maximo !== null ? subjectColumnStats["P1"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                                  {subjectColumnStats["P2"]?.maximo !== null ? subjectColumnStats["P2"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-emerald-700 bg-indigo-50/40 text-xs">
+                                  {subjectColumnStats["PF"]?.maximo !== null ? subjectColumnStats["PF"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                              </>
+                            ) : (
+                              <>
+                                {gradeHeaders.map((header, gIdx) => {
+                                  const stat = subjectColumnStats[header.label];
+                                  const val = stat ? stat.maximo : null;
+                                  return (
+                                    <td key={`max-${gIdx}`} className="px-2 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                                      {val !== null ? val.toFixed(1).replace(".", ",") : "-"}
+                                    </td>
+                                  );
+                                })}
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                                  {subjectColumnStats["P1"]?.maximo !== null ? subjectColumnStats["P1"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                                  {subjectColumnStats["P2"]?.maximo !== null ? subjectColumnStats["P2"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                                <td className="px-3 py-2 text-center whitespace-nowrap font-semibold text-emerald-700 bg-indigo-50/40 text-xs">
+                                  {subjectColumnStats["PF"]?.maximo !== null ? subjectColumnStats["PF"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                              </>
+                            )
+                          ) : (
+                            <>
+                              <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                                {subjectColumnStats["P1 General"]?.maximo !== null ? subjectColumnStats["P1 General"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className="px-4 py-2 text-center whitespace-nowrap font-medium text-emerald-600 text-xs">
+                                {subjectColumnStats["P2 General"]?.maximo !== null ? subjectColumnStats["P2 General"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className="px-4 py-2 text-center whitespace-nowrap font-semibold text-emerald-700 bg-indigo-50/40 text-xs">
+                                {subjectColumnStats["Promedio General"]?.maximo !== null ? subjectColumnStats["Promedio General"]?.maximo?.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                            </>
+                          )}
+                          <td className="px-4 py-2 text-center whitespace-nowrap font-normal text-slate-400">-</td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </section>
 
-                    if (categoriesToShow.length === 0) {
-                      return (
-                        <p className="text-xs text-slate-400 italic">
-                          No hay datos de categorías registradas en Excel para esta asignatura/vista.
-                        </p>
-                      );
-                    }
+              {/* Card: Datos de Referencia y Leyendas */}
+              {excelExtraData && (
+                <section className="grid gap-6 md:grid-cols-2 print:hidden">
+                  {/* Categorías Académicas */}
+                  {excelExtraData.categorias.length > 0 && (
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <h3 className="font-semibold text-slate-800 flex items-center gap-2 mb-4">
+                        <Info className="h-5 w-5 text-indigo-500" />
+                        Categorías Académicas (Reporte Excel)
+                      </h3>
+                      {(() => {
+                        const categoriesToShow = excelExtraData.categorias.map(cat => {
+                          const val = getExcelCategoryVal(
+                            cat.label,
+                            selectedCalificacionesAsignatura !== "all" ? "pf" : "pf_gen",
+                            selectedCalificacionesAsignatura !== "all" ? selectedCalificacionesAsignatura : undefined
+                          );
+                          return {
+                            label: cat.label,
+                            value: val !== null ? Number(val) : 0,
+                          };
+                        }).filter(c => !isNaN(c.value) && c.value > 0);
 
-                    const maxVal = Math.max(...categoriesToShow.map(c => c.value), 1);
-
-                    return (
-                      <div className="space-y-4">
-                        {categoriesToShow.map((cat, cIdx) => {
-                          let barColor = "bg-indigo-500";
-                          let bgLight = "bg-indigo-50";
-                          let textColor = "text-indigo-700";
-                          const lbl = cat.label.toLowerCase();
-                          if (lbl.includes("insuficiente") || lbl.includes("bajo") || lbl.includes("reprobado")) {
-                            barColor = "bg-rose-500";
-                            bgLight = "bg-rose-50";
-                            textColor = "text-rose-700";
-                          } else if (lbl.includes("elemental") || lbl.includes("medio") || lbl.includes("regular")) {
-                            barColor = "bg-amber-500";
-                            bgLight = "bg-amber-50";
-                            textColor = "text-amber-700";
-                          } else if (lbl.includes("adecuado") || lbl.includes("bueno") || lbl.includes("aprobado")) {
-                            barColor = "bg-emerald-500";
-                            bgLight = "bg-emerald-50";
-                            textColor = "text-emerald-700";
-                          } else if (lbl.includes("destacado") || lbl.includes("excelente") || lbl.includes("alto")) {
-                            barColor = "bg-purple-500";
-                            bgLight = "bg-purple-50";
-                            textColor = "text-purple-700";
-                          }
-
-                          const pct = (cat.value / maxVal) * 100;
-
+                        if (categoriesToShow.length === 0) {
                           return (
-                            <div key={cIdx} className="space-y-1">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="font-medium text-slate-700">{cat.label}</span>
-                                <span className={`font-bold px-2 py-0.5 rounded-full text-[10px] ${bgLight} ${textColor}`}>
-                                  {cat.value} alumnos
-                                </span>
-                              </div>
-                              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-                                  style={{ width: `${pct}%` }}
-                                />
-                              </div>
+                            <p className="text-xs text-slate-400 italic">
+                              No hay datos de categorías registradas en Excel para esta asignatura/vista.
+                            </p>
+                          );
+                        }
+
+                        const maxVal = Math.max(...categoriesToShow.map(c => c.value), 1);
+
+                        return (
+                          <div className="space-y-4">
+                            {categoriesToShow.map((cat, cIdx) => {
+                              let barColor = "bg-indigo-500";
+                              let bgLight = "bg-indigo-50";
+                              let textColor = "text-indigo-700";
+                              const lbl = cat.label.toLowerCase();
+                              if (lbl.includes("insuficiente") || lbl.includes("bajo") || lbl.includes("reprobado")) {
+                                barColor = "bg-rose-500";
+                                bgLight = "bg-rose-50";
+                                textColor = "text-rose-700";
+                              } else if (lbl.includes("elemental") || lbl.includes("medio") || lbl.includes("regular")) {
+                                barColor = "bg-amber-500";
+                                bgLight = "bg-amber-50";
+                                textColor = "text-amber-700";
+                              } else if (lbl.includes("adecuado") || lbl.includes("bueno") || lbl.includes("aprobado")) {
+                                barColor = "bg-emerald-500";
+                                bgLight = "bg-emerald-50";
+                                textColor = "text-emerald-700";
+                              } else if (lbl.includes("destacado") || lbl.includes("excelente") || lbl.includes("alto")) {
+                                barColor = "bg-purple-500";
+                                bgLight = "bg-purple-50";
+                                textColor = "text-purple-700";
+                              }
+
+                              const pct = (cat.value / maxVal) * 100;
+
+                              return (
+                                <div key={cIdx} className="space-y-1">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="font-medium text-slate-700">{cat.label}</span>
+                                    <span className={`font-bold px-2 py-0.5 rounded-full text-[10px] ${bgLight} ${textColor}`}>
+                                      {cat.value} alumnos
+                                    </span>
+                                  </div>
+                                  <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                                      style={{ width: `${pct}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {/* Leyenda de Siglas */}
+                  {excelExtraData.leyendas.length > 0 && (
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                      <h3 className="font-semibold text-slate-800 flex items-center gap-2 mb-3">
+                        <BookOpen className="h-5 w-5 text-indigo-500" />
+                        Leyenda de Siglas
+                      </h3>
+                      <div className="space-y-2">
+                        {excelExtraData.leyendas.map((leyenda, lIdx) => {
+                          const parts = leyenda.split(":");
+                          const abbreviation = parts[0] ? parts[0].trim() : "";
+                          const definition = parts[1] ? parts[1].trim() : "";
+                          return (
+                            <div key={lIdx} className="flex items-start gap-2 text-xs">
+                              <span className="inline-flex items-center justify-center font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] min-w-[32px] text-center">
+                                {abbreviation}
+                              </span>
+                              <span className="text-slate-600 font-medium">{definition}</span>
                             </div>
                           );
                         })}
                       </div>
-                    );
-                  })()}
-                </div>
+                    </div>
+                  )}
+                </section>
               )}
+            </>
+          ) : (
+            <>
+              {/* Dashboard y tabla de Riesgo de Promoción */}
+              <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                <article className="relative overflow-hidden rounded-xl bg-rose-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+                  <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+                  <div className="relative z-10 flex flex-col justify-between h-full">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-rose-100">Alumnos en Riesgo</p>
+                    <p className="text-3xl font-extrabold mt-1">{riesgoMetrics.totalRiesgo}</p>
+                  </div>
+                </article>
 
-              {/* Leyenda de Siglas */}
-              {excelExtraData.leyendas.length > 0 && (
-                <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                  <h3 className="font-semibold text-slate-800 flex items-center gap-2 mb-3">
-                    <BookOpen className="h-5 w-5 text-indigo-500" />
-                    Leyenda de Siglas
-                  </h3>
-                  <div className="space-y-2">
-                    {excelExtraData.leyendas.map((leyenda, lIdx) => {
-                      const parts = leyenda.split(":");
-                      const abbreviation = parts[0] ? parts[0].trim() : "";
-                      const definition = parts[1] ? parts[1].trim() : "";
-                      return (
-                        <div key={lIdx} className="flex items-start gap-2 text-xs">
-                          <span className="inline-flex items-center justify-center font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] min-w-[32px] text-center">
-                            {abbreviation}
-                          </span>
-                          <span className="text-slate-600 font-medium">{definition}</span>
-                        </div>
-                      );
-                    })}
+                <article className="relative overflow-hidden rounded-xl bg-amber-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+                  <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+                  <div className="relative z-10 flex flex-col justify-between h-full">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-amber-100">Promedio de Notas Grupo</p>
+                    <p className="text-3xl font-extrabold mt-1">{riesgoMetrics.avgGrade !== 0 ? riesgoMetrics.avgGrade.toFixed(2) : "-"}</p>
+                  </div>
+                </article>
+
+                <article className="relative overflow-hidden rounded-xl bg-blue-600 px-4 py-4.5 text-white shadow-sm transition hover:shadow-md">
+                  <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+                  <div className="relative z-10 flex flex-col justify-between h-full">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">Asistencia Promedio</p>
+                    <p className="text-3xl font-extrabold mt-1">{riesgoMetrics.avgAsist !== 0 ? riesgoMetrics.avgAsist + "%" : "-"}</p>
+                  </div>
+                </article>
+
+                <article className="relative overflow-hidden rounded-xl bg-indigo-650 px-4 py-4.5 text-white bg-indigo-600 shadow-sm transition hover:shadow-md">
+                  <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
+                  <div className="relative z-10 flex flex-col justify-between h-full">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Casos Muy Críticos</p>
+                    <p className="text-3xl font-extrabold mt-1">{riesgoMetrics.countLowGrade + riesgoMetrics.countLowAsist}</p>
+                  </div>
+                </article>
+              </section>
+
+              {/* Filtros de Riesgo */}
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                <div className="mb-6 flex flex-col gap-4 border-b border-slate-100 pb-5">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                      <Filter className="h-4 w-4 text-rose-500" />
+                      Filtros de Riesgo de Promoción
+                    </h3>
+                    {(riesgoSearch !== "" || riesgoFilter !== "all") && (
+                      <button
+                        onClick={() => {
+                          setRiesgoSearch("");
+                          setRiesgoFilter("all");
+                        }}
+                        className="text-xs text-indigo-600 hover:text-indigo-850 font-semibold underline cursor-pointer"
+                      >
+                        Restablecer todos los filtros
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {/* Búsqueda */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                        Buscar Estudiante
+                      </label>
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <input
+                          value={riesgoSearch}
+                          onChange={(e) => setRiesgoSearch(e.target.value)}
+                          placeholder="Nombre estudiante..."
+                          className="w-full rounded-xl border border-slate-300 bg-white py-2 pl-9 pr-3 text-xs outline-none ring-rose-500 transition focus:ring"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Filtro de Criterio */}
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                        Criterio de Riesgo
+                      </label>
+                      <select
+                        value={riesgoFilter}
+                        onChange={(e) => setRiesgoFilter(e.target.value as any)}
+                        className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs outline-none ring-rose-500 focus:ring cursor-pointer"
+                      >
+                        <option value="all">Ver todos los casos</option>
+                        <option value="average">Solo Promedio General &lt; 4.0</option>
+                        <option value="attendance">Solo Asistencia &lt; 85%</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
-              )}
-            </section>
+
+                {/* Tabla de Resultados de Riesgo */}
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-500 font-medium">
+                        {visibleRiesgoHeaders.map((vh, idx) => (
+                          <th key={idx} className="px-4 py-3 font-bold">{vh.display}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredRiesgoStudents.length > 0 ? (
+                        filteredRiesgoStudents.map((student) => (
+                          <tr key={student.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
+                            {visibleRiesgoHeaders.map((vh, hIdx) => {
+                              const header = vh.original;
+                              const val = student.dynamicFields[header] ?? "-";
+
+                              const isAvg = header.toLowerCase().includes("promedio") || header.toLowerCase().includes("prom");
+                              const isAsist = header.toLowerCase().includes("asistencia") || header.toLowerCase().includes("asist");
+
+                              let cellClass = "text-slate-800 font-medium";
+                              let displayVal = String(val);
+
+                              if (isAvg) {
+                                const num = parseFloat(String(val).replace(",", "."));
+                                if (!isNaN(num)) {
+                                  cellClass = num < 4.0 ? "text-rose-600 font-extrabold" : num >= 6.0 ? "text-emerald-600 font-bold" : "text-slate-800 font-semibold";
+                                  displayVal = num.toFixed(1).replace(".", ",");
+                                }
+                              } else if (isAsist) {
+                                const num = parseFloat(String(val).replace("%", "").trim());
+                                if (!isNaN(num)) {
+                                  cellClass = num < 85 ? "text-rose-650 font-extrabold animate-pulse" : "text-slate-800 font-semibold";
+                                  displayVal = `${Math.round(num)}%`;
+                                }
+                              }
+
+                              const isName = vh.display.toLowerCase() === "estudiante" || header.toLowerCase().includes("estudiante") || header.toLowerCase().includes("alumno") || header.toLowerCase().includes("nombre");
+                              if (isName) {
+                                cellClass = "text-slate-900 font-bold";
+                              }
+
+                              return (
+                                <td key={hIdx} className={`px-4 py-3.5 whitespace-nowrap ${cellClass}`}>
+                                  {isName ? student.estudiante : displayVal}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={visibleRiesgoHeaders.length || 1} className="text-center py-12 text-slate-400 italic">
+                            No se encontraron estudiantes que coincidan con los filtros de riesgo.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            </>
           )}
         </div>
       </main>
@@ -2490,8 +3250,8 @@ export default function Home() {
               <button
                 onClick={() => setActiveCourseTab("all")}
                 className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${activeCourseTab === "all"
-                    ? "bg-indigo-600 text-white shadow-sm"
-                    : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
                   }`}
               >
                 General
@@ -2501,8 +3261,8 @@ export default function Home() {
                   key={curso}
                   onClick={() => setActiveCourseTab(curso)}
                   className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${activeCourseTab === curso
-                      ? "bg-indigo-600 text-white shadow-sm"
-                      : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
                     }`}
                 >
                   {curso}
@@ -3140,12 +3900,16 @@ export default function Home() {
 
       {/* Reporte de impresión limpio y compacto */}
       <div className="hidden print:block bg-white text-black font-sans p-2 text-xs leading-normal">
-        {appMode === "calificaciones" ? (
+        {appMode === "calificaciones" || (appMode === "panorama_riesgo" && panoramaActiveTab === "panorama") ? (
           <>
             <header className="border-b border-slate-400 pb-2 mb-3 flex justify-between items-end">
               <div>
-                <h1 className="text-lg font-bold text-slate-900">Reporte de Calificaciones y Rendimiento</h1>
-                <p className="text-[10px] text-slate-500">Kimche Analyzer - Análisis de Rendimiento Escolar</p>
+                <h1 className="text-lg font-bold text-slate-900">
+                  {appMode === "panorama_riesgo" ? "Reporte de Panorama Global del Curso" : "Reporte de Calificaciones y Rendimiento"}
+                </h1>
+                <p className="text-[10px] text-slate-500">
+                  {appMode === "panorama_riesgo" ? "Kimche Analyzer - Visión General de Asignaturas" : "Kimche Analyzer - Análisis de Rendimiento Escolar"}
+                </p>
               </div>
               <div className="text-right text-[9px] text-slate-600">
                 <p><strong>Fecha Emisión:</strong> {new Date().toLocaleDateString("es-CL", { day: "numeric", month: "long", year: "numeric" })}</p>
@@ -3182,17 +3946,21 @@ export default function Home() {
                     <th className="py-0.5 px-1 text-center font-semibold w-8">Nº</th>
                     <th className="py-0.5 px-1 text-left font-semibold">Estudiante</th>
                     {selectedCalificacionesAsignatura !== "all" ? (
-                      <>
-                        {calificaciones.find(s => s.subjects.some(sub => sub.subjectName === selectedCalificacionesAsignatura))
-                          ?.subjects.find(sub => sub.subjectName === selectedCalificacionesAsignatura)
-                          ?.grades.map((grade, gIdx) => (
-                            <th key={gIdx} className="py-0.5 px-1 text-center font-semibold" style={{ minWidth: '24px' }}>{grade.label}</th>
-                          ))
-                        }
-                        <th className="py-0.5 px-1 text-center font-semibold w-10">P1</th>
-                        <th className="py-0.5 px-1 text-center font-semibold w-10">P2</th>
-                        <th className="py-0.5 px-1 text-center font-semibold w-10">PF</th>
-                      </>
+                      appMode === "panorama_riesgo" ? (
+                        <th className="py-0.5 px-1 text-center font-semibold" style={{ minWidth: '40px' }}>{selectedCalificacionesAsignatura}</th>
+                      ) : (
+                        <>
+                          {calificaciones.find(s => s.subjects.some(sub => sub.subjectName === selectedCalificacionesAsignatura))
+                            ?.subjects.find(sub => sub.subjectName === selectedCalificacionesAsignatura)
+                            ?.grades.map((grade, gIdx) => (
+                              <th key={gIdx} className="py-0.5 px-1 text-center font-semibold" style={{ minWidth: '24px' }}>{grade.label}</th>
+                            ))
+                          }
+                          <th className="py-0.5 px-1 text-center font-semibold w-10">P1</th>
+                          <th className="py-0.5 px-1 text-center font-semibold w-10">P2</th>
+                          <th className="py-0.5 px-1 text-center font-semibold w-10">PF</th>
+                        </>
+                      )
                     ) : (
                       <>
                         <th className="py-0.5 px-1 text-center font-semibold w-16">P1 Gral</th>
@@ -3233,22 +4001,28 @@ export default function Home() {
                         <td className="py-0.5 px-1 font-medium">{student.estudiante}</td>
 
                         {selectedCalificacionesAsignatura !== "all" ? (
-                          <>
-                            {studentGrades.map((g, gIdx) => (
-                              <td key={gIdx} className={`py-0.5 px-1 text-center ${g.value !== null && g.value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
-                                {g.value !== null ? g.value.toFixed(1).replace(".", ",") : "-"}
-                              </td>
-                            ))}
-                            <td className={`py-0.5 px-1 text-center ${p1Value !== null && p1Value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
-                              {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
-                            </td>
-                            <td className={`py-0.5 px-1 text-center ${p2Value !== null && p2Value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
-                              {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
-                            </td>
-                            <td className={`py-0.5 px-1 text-center font-bold ${finalGrade !== null && finalGrade < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                          appMode === "panorama_riesgo" ? (
+                            <td className={`py-0.5 px-1 text-center ${finalGrade !== null && finalGrade < 4.0 ? "text-rose-600 font-bold" : ""}`}>
                               {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
                             </td>
-                          </>
+                          ) : (
+                            <>
+                              {studentGrades.map((g, gIdx) => (
+                                <td key={gIdx} className={`py-0.5 px-1 text-center ${g.value !== null && g.value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                                  {g.value !== null ? g.value.toFixed(1).replace(".", ",") : "-"}
+                                </td>
+                              ))}
+                              <td className={`py-0.5 px-1 text-center ${p1Value !== null && p1Value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                                {p1Value !== null ? p1Value.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className={`py-0.5 px-1 text-center ${p2Value !== null && p2Value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                                {p2Value !== null ? p2Value.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                              <td className={`py-0.5 px-1 text-center font-bold ${finalGrade !== null && finalGrade < 4.0 ? "text-rose-600 font-bold" : ""}`}>
+                                {finalGrade !== null ? finalGrade.toFixed(1).replace(".", ",") : "-"}
+                              </td>
+                            </>
+                          )
                         ) : (
                           <>
                             <td className={`py-0.5 px-1 text-center ${p1Value !== null && p1Value < 4.0 ? "text-rose-600 font-bold" : ""}`}>
@@ -3269,6 +4043,104 @@ export default function Home() {
                       </tr>
                     );
                   })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : appMode === "panorama_riesgo" && panoramaActiveTab === "riesgo" ? (
+          <>
+            <header className="border-b border-slate-400 pb-2 mb-3 flex justify-between items-end">
+              <div>
+                <h1 className="text-lg font-bold text-slate-900">Reporte de Alumnos en Riesgo de Promoción</h1>
+                <p className="text-[10px] text-slate-500">Kimche Analyzer - Análisis de Repitencia y Asistencia</p>
+              </div>
+              <div className="text-right text-[9px] text-slate-600">
+                <p><strong>Fecha Emisión:</strong> {new Date().toLocaleDateString("es-CL", { day: "numeric", month: "long", year: "numeric" })}</p>
+              </div>
+            </header>
+
+            {/* Filtros aplicados */}
+            {(riesgoSearch !== "" || riesgoFilter !== "all") && (
+              <div className="mb-3 bg-slate-50 border border-slate-200 p-1.5 rounded text-[9px] text-slate-700">
+                <p className="font-semibold mb-0.5">Filtros aplicados en la consulta:</p>
+                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5">
+                  {riesgoSearch !== "" && <p>• <strong>Búsqueda:</strong> &quot;{riesgoSearch}&quot;</p>}
+                  {riesgoFilter !== "all" && <p>• <strong>Criterio:</strong> {riesgoFilter === "average" ? "Promedio < 4.0" : "Asistencia < 85%"}</p>}
+                </div>
+              </div>
+            )}
+
+            {/* Métricas clave */}
+            <div className="grid grid-cols-4 gap-3 mb-3">
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Alumnos en Riesgo</p>
+                <p className="text-base font-bold text-slate-900 mt-0.5">{riesgoMetrics.totalRiesgo}</p>
+              </div>
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Promedio Notas Grupo</p>
+                <p className="text-base font-bold text-slate-800 mt-0.5">{riesgoMetrics.avgGrade !== 0 ? riesgoMetrics.avgGrade.toFixed(2) : "-"}</p>
+              </div>
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Asistencia Promedio</p>
+                <p className="text-base font-bold text-slate-800 mt-0.5">{riesgoMetrics.avgAsist !== 0 ? riesgoMetrics.avgAsist + "%" : "-"}</p>
+              </div>
+              <div className="border border-slate-300 p-1.5 text-center rounded">
+                <p className="text-[8px] font-semibold text-slate-500 uppercase">Casos Críticos</p>
+                <p className="text-base font-bold text-slate-800 mt-0.5">{riesgoMetrics.countLowGrade + riesgoMetrics.countLowAsist}</p>
+              </div>
+            </div>
+
+            {/* Tabla de Riesgo */}
+            <div>
+              <h3 className="text-[10px] font-bold text-slate-800 border-b border-slate-400 pb-0.5 mb-1">Listado de Estudiantes en Peligro de Repitencia</h3>
+              <table className="w-full text-[9px] border border-slate-300 border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-300">
+                    {visibleRiesgoHeaders.map((vh, idx) => (
+                      <th key={idx} className="py-0.5 px-1 text-left font-semibold">{vh.display}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRiesgoStudents.map((student) => (
+                    <tr key={student.id} className="border-b border-slate-200">
+                      {visibleRiesgoHeaders.map((vh, hIdx) => {
+                        const header = vh.original;
+                        const val = student.dynamicFields[header] ?? "-";
+                        const isAvg = header.toLowerCase().includes("promedio") || header.toLowerCase().includes("prom");
+                        const isAsist = header.toLowerCase().includes("asistencia") || header.toLowerCase().includes("asist");
+
+                        let cellClass = "";
+                        let displayVal = String(val);
+
+                        if (isAvg) {
+                          const num = parseFloat(String(val).replace(",", "."));
+                          if (!isNaN(num)) {
+                            if (num < 4.0) {
+                              cellClass = "text-rose-600 font-bold";
+                            }
+                            displayVal = num.toFixed(1).replace(".", ",");
+                          }
+                        } else if (isAsist) {
+                          const num = parseFloat(String(val).replace("%", "").trim());
+                          if (!isNaN(num)) {
+                            if (num < 85) {
+                              cellClass = "text-rose-600 font-bold";
+                            }
+                            displayVal = `${Math.round(num)}%`;
+                          }
+                        }
+
+                        const isName = vh.display.toLowerCase() === "estudiante" || header.toLowerCase().includes("estudiante") || header.toLowerCase().includes("alumno") || header.toLowerCase().includes("nombre");
+
+                        return (
+                          <td key={hIdx} className={`py-0.5 px-1 ${cellClass} ${isName ? "font-bold" : ""}`}>
+                            {isName ? student.estudiante : displayVal}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
