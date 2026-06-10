@@ -12,12 +12,12 @@ export const REQUIRED_HEADERS = [
 ] as const;
 
 export const PIE_COLORS: Record<string, string> = {
-  "Anotaciones positivas": "#10b981",
-  "Anotaciones negativas": "#ef4444",
-  "Observaciones": "#f59e0b",
-  "Citaciones a apoderado": "#8b5cf6",
-  "Derivaciones": "#06b6d4",
-  "Entrevistas con apoderado": "#6366f1",
+  "Anotaciones positivas": "#a855f7",
+  "Anotaciones negativas": "#f43f5e",
+  "Observaciones": "#e879f9",
+  "Citaciones a apoderado": "#c084fc",
+  "Derivaciones": "#f472b6",
+  "Entrevistas con apoderado": "#7c3aed",
   "Entrevistas con estudiante": "#ec4899",
 };
 export const DIACRITICS_REGEX = /[\u0300-\u036f]/g;

@@ -66,6 +66,16 @@ const REQUIRED_HEADERS = [
   "Descripción",
 ] as const;
 
+const DEFAULT_PIE_COLORS: Record<string, string> = {
+  "Anotaciones positivas": "#10b981",
+  "Anotaciones negativas": "#ef4444",
+  "Observaciones": "#f59e0b",
+  "Citaciones a apoderado": "#8b5cf6",
+  "Derivaciones": "#06b6d4",
+  "Entrevistas con apoderado": "#6366f1",
+  "Entrevistas con estudiante": "#ec4899",
+};
+
 const LoadingOverlay = () => (
   <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-md select-none transition-all duration-300">
     <div className="relative flex items-center justify-center h-20 w-20">
@@ -100,6 +110,7 @@ export default function Home() {
   const [selectedCursoObs, setSelectedCursoObs] = useState<string>("all");
   const [selectedFechaObs, setSelectedFechaObs] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(false);
+  const [pinkMode, setPinkMode] = useState(false);
   const [uploadedFilesCount, setUploadedFilesCount] = useState<number>(0);
   const [activeCourseTab, setActiveCourseTab] = useState<string>("all");
 
@@ -1565,6 +1576,8 @@ export default function Home() {
   }
 
   // Observations dashboard (default)
+  const activePieColors = pinkMode ? PIE_COLORS : DEFAULT_PIE_COLORS;
+
   return (
     <>
       <main className="flex-grow w-full bg-slate-100 px-4 py-8 text-slate-900 print:hidden">
@@ -1590,6 +1603,17 @@ export default function Home() {
               >
                 Generar PDF
               </button>
+              <button
+                onClick={() => setPinkMode(p => !p)}
+                title={pinkMode ? "Desactivar modo rosa" : "Activar modo rosa"}
+                className={`rounded-xl px-3 py-2.5 text-sm transition active:scale-95 shadow-sm border ${
+                  pinkMode
+                    ? "bg-pink-100 text-pink-700 border-pink-300 hover:bg-pink-200"
+                    : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                }`}
+              >
+                🌸
+              </button>
             </div>
           </header>
 
@@ -1614,45 +1638,45 @@ export default function Home() {
           )}
 
           <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <article className="relative overflow-hidden rounded-xl bg-blue-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+            <article className={`relative overflow-hidden rounded-xl px-4 py-3.5 text-white shadow-sm transition hover:shadow-md ${pinkMode ? "bg-violet-600" : "bg-indigo-600"}`}>
               <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
               <div className="relative z-10 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="rounded-lg bg-white/10 p-1.5 text-white"><Users className="h-4 w-4" /></div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-blue-100">Observaciones procesadas</p>
+                  <p className={`text-xs font-semibold uppercase tracking-wider ${pinkMode ? "text-violet-100" : "text-indigo-100"}`}>Observaciones procesadas</p>
                 </div>
                 <p className="text-2xl font-extrabold">{total}</p>
               </div>
             </article>
 
-            <article className="relative overflow-hidden rounded-xl bg-emerald-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+            <article className={`relative overflow-hidden rounded-xl px-4 py-3.5 text-white shadow-sm transition hover:shadow-md ${pinkMode ? "bg-purple-600" : "bg-emerald-600"}`}>
               <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
               <div className="relative z-10 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="rounded-lg bg-white/10 p-1.5 text-white"><CheckCircle2 className="h-4 w-4" /></div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Anotaciones positivas</p>
+                  <p className={`text-xs font-semibold uppercase tracking-wider ${pinkMode ? "text-purple-100" : "text-emerald-100"}`}>Anotaciones positivas</p>
                 </div>
                 <p className="text-2xl font-extrabold">{summary.positivas}</p>
               </div>
             </article>
 
-            <article className="relative overflow-hidden rounded-xl bg-rose-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+            <article className={`relative overflow-hidden rounded-xl px-4 py-3.5 text-white shadow-sm transition hover:shadow-md ${pinkMode ? "bg-pink-600" : "bg-rose-600"}`}>
               <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none" />
               <div className="relative z-10 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="rounded-lg bg-white/10 p-1.5 text-white"><AlertCircle className="h-4 w-4" /></div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-rose-100">Anotaciones negativas</p>
+                  <p className={`text-xs font-semibold uppercase tracking-wider ${pinkMode ? "text-pink-100" : "text-rose-100"}`}>Anotaciones negativas</p>
                 </div>
                 <p className="text-2xl font-extrabold">{summary.negativas}</p>
               </div>
             </article>
 
-            <article className="group cursor-help relative overflow-visible rounded-xl bg-indigo-600 px-4 py-3.5 text-white shadow-sm transition hover:shadow-md">
+            <article className={`group cursor-help relative overflow-visible rounded-xl px-4 py-3.5 text-white shadow-sm transition hover:shadow-md ${pinkMode ? "bg-fuchsia-600" : "bg-indigo-500"}`}>
               <div className="absolute inset-0 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] [background-size:12px_12px] opacity-15 pointer-events-none rounded-xl" />
               <div className="relative z-10 flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="rounded-lg bg-white/10 p-1.5 text-white"><Star className="h-4 w-4" /></div>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Ratio de convivencia</p>
+                  <p className={`text-xs font-semibold uppercase tracking-wider ${pinkMode ? "text-fuchsia-100" : "text-indigo-100"}`}>Ratio de convivencia</p>
                 </div>
                 <p className="text-2xl font-extrabold">{positiveObservationsPercentage}%</p>
               </div>
@@ -1667,10 +1691,10 @@ export default function Home() {
           </section>
 
           <section className="grid gap-4 md:grid-cols-2">
-            <article className="rounded-2xl border-l-4 border-l-emerald-500 border-y border-r border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between">
+            <article className={`rounded-2xl border-l-4 border-y border-r border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between ${pinkMode ? "border-l-purple-500" : "border-l-emerald-500"}`}>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">Última Anotación Positiva</span>
+                  <span className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full ${pinkMode ? "text-purple-600 bg-purple-50" : "text-emerald-600 bg-emerald-50"}`}>Última Anotación Positiva</span>
                   {latestPositive && <span className="text-xs text-slate-500">{latestPositive.fechaTexto}</span>}
                 </div>
                 {latestPositive ? (
@@ -1684,10 +1708,10 @@ export default function Home() {
               </div>
             </article>
 
-            <article className="rounded-2xl border-l-4 border-l-rose-500 border-y border-r border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between">
+            <article className={`rounded-2xl border-l-4 border-y border-r border-slate-200 bg-white p-5 shadow-sm flex flex-col justify-between ${pinkMode ? "border-l-pink-500" : "border-l-rose-500"}`}>
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-rose-600 bg-rose-50 px-2.5 py-1 rounded-full">Última Anotación Negativa</span>
+                  <span className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full ${pinkMode ? "text-pink-600 bg-pink-50" : "text-rose-600 bg-rose-50"}`}>Última Anotación Negativa</span>
                   {latestNegative && <span className="text-xs text-slate-500">{latestNegative.fechaTexto}</span>}
                 </div>
                 {latestNegative ? (
@@ -1711,7 +1735,7 @@ export default function Home() {
                     <PieChart>
                       <Pie data={pieData} dataKey="value" nameKey="name" outerRadius={100} innerRadius={50}>
                         {pieData.map((entry) => (
-                          <Cell key={entry.name} fill={PIE_COLORS[entry.name] ?? "#94a3b8"} />
+                          <Cell key={entry.name} fill={activePieColors[entry.name] ?? "#94a3b8"} />
                         ))}
                       </Pie>
                       <Tooltip />
@@ -1721,7 +1745,7 @@ export default function Home() {
                 <ul className="flex flex-col gap-2 text-sm flex-1">
                   {pieData.map((entry) => (
                     <li key={entry.name} className="flex items-center gap-2.5">
-                      <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: PIE_COLORS[entry.name] ?? "#94a3b8" }} />
+                      <span className="h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: activePieColors[entry.name] ?? "#94a3b8" }} />
                       <span className="text-slate-700 font-medium">{entry.name}</span>
                       <span className="ml-auto font-bold text-slate-900">{entry.value}</span>
                     </li>
@@ -1754,17 +1778,17 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => setShowPositiveTrend(!showPositiveTrend)}
-                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${showPositiveTrend ? "bg-emerald-100 text-emerald-800 border-emerald-300" : "bg-slate-50 text-slate-400 border-slate-200 line-through"}`}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${showPositiveTrend ? (pinkMode ? "bg-purple-100 text-purple-800 border-purple-300" : "bg-emerald-100 text-emerald-800 border-emerald-300") : "bg-slate-50 text-slate-400 border-slate-200 line-through"}`}
                     >
-                      <span className={`h-2 w-2 rounded-full ${showPositiveTrend ? "bg-emerald-500" : "bg-slate-400"}`} />
+                      <span className={`h-2 w-2 rounded-full ${showPositiveTrend ? (pinkMode ? "bg-purple-500" : "bg-emerald-500") : "bg-slate-400"}`} />
                       Positivas
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowNegativeTrend(!showNegativeTrend)}
-                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${showNegativeTrend ? "bg-rose-100 text-rose-800 border-rose-300" : "bg-slate-50 text-slate-400 border-slate-200 line-through"}`}
+                      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border transition ${showNegativeTrend ? (pinkMode ? "bg-pink-100 text-pink-800 border-pink-300" : "bg-rose-100 text-rose-800 border-rose-300") : "bg-slate-50 text-slate-400 border-slate-200 line-through"}`}
                     >
-                      <span className={`h-2 w-2 rounded-full ${showNegativeTrend ? "bg-rose-500" : "bg-slate-400"}`} />
+                      <span className={`h-2 w-2 rounded-full ${showNegativeTrend ? (pinkMode ? "bg-pink-500" : "bg-rose-500") : "bg-slate-400"}`} />
                       Negativas
                     </button>
                   </div>
@@ -1777,10 +1801,10 @@ export default function Home() {
                     <XAxis dataKey="fecha" />
                     <YAxis allowDecimals={false} />
                     <Tooltip />
-                    {showPositiveTrend && <Line type="monotone" dataKey="positivas" stroke="#10b981" strokeWidth={2} dot={{ r: 4, fill: "#10b981", stroke: "#10b981" }} name="Positivas" />}
-                    {showPositiveTrend && <Line type="monotone" dataKey="tendenciaPositiva" stroke="#059669" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Positivas" />}
-                    {showNegativeTrend && <Line type="monotone" dataKey="negativas" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: "#ef4444", stroke: "#ef4444" }} name="Negativas" />}
-                    {showNegativeTrend && <Line type="monotone" dataKey="tendenciaNegativa" stroke="#dc2626" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Negativas" />}
+                    {showPositiveTrend && <Line type="monotone" dataKey="positivas" stroke={pinkMode ? "#a855f7" : "#10b981"} strokeWidth={2} dot={{ r: 4, fill: pinkMode ? "#a855f7" : "#10b981", stroke: pinkMode ? "#a855f7" : "#10b981" }} name="Positivas" />}
+                    {showPositiveTrend && <Line type="monotone" dataKey="tendenciaPositiva" stroke={pinkMode ? "#7c3aed" : "#059669"} strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Positivas" />}
+                    {showNegativeTrend && <Line type="monotone" dataKey="negativas" stroke={pinkMode ? "#f43f5e" : "#f43f5e"} strokeWidth={2} dot={{ r: 4, fill: pinkMode ? "#f43f5e" : "#f43f5e", stroke: pinkMode ? "#f43f5e" : "#f43f5e" }} name="Negativas" />}
+                    {showNegativeTrend && <Line type="monotone" dataKey="tendenciaNegativa" stroke={pinkMode ? "#e11d48" : "#e11d48"} strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Negativas" />}
                   </LineChart>
                 ) : (
                   <LineChart data={monthlyData}>
@@ -1788,10 +1812,10 @@ export default function Home() {
                     <XAxis dataKey="mes" />
                     <YAxis allowDecimals={false} />
                     <Tooltip />
-                    {showPositiveTrend && <Line type="monotone" dataKey="positivas" stroke="#10b981" strokeWidth={2} dot={{ r: 4, fill: "#10b981", stroke: "#10b981" }} name="Positivas" />}
-                    {showPositiveTrend && <Line type="monotone" dataKey="tendenciaPositiva" stroke="#059669" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Positivas" />}
-                    {showNegativeTrend && <Line type="monotone" dataKey="negativas" stroke="#ef4444" strokeWidth={2} dot={{ r: 4, fill: "#ef4444", stroke: "#ef4444" }} name="Negativas" />}
-                    {showNegativeTrend && <Line type="monotone" dataKey="tendenciaNegativa" stroke="#dc2626" strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Negativas" />}
+                    {showPositiveTrend && <Line type="monotone" dataKey="positivas" stroke={pinkMode ? "#a855f7" : "#10b981"} strokeWidth={2} dot={{ r: 4, fill: pinkMode ? "#a855f7" : "#10b981", stroke: pinkMode ? "#a855f7" : "#10b981" }} name="Positivas" />}
+                    {showPositiveTrend && <Line type="monotone" dataKey="tendenciaPositiva" stroke={pinkMode ? "#7c3aed" : "#059669"} strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Positivas" />}
+                    {showNegativeTrend && <Line type="monotone" dataKey="negativas" stroke={pinkMode ? "#f43f5e" : "#f43f5e"} strokeWidth={2} dot={{ r: 4, fill: pinkMode ? "#f43f5e" : "#f43f5e", stroke: pinkMode ? "#f43f5e" : "#f43f5e" }} name="Negativas" />}
+                    {showNegativeTrend && <Line type="monotone" dataKey="tendenciaNegativa" stroke={pinkMode ? "#e11d48" : "#e11d48"} strokeDasharray="4 4" dot={false} activeDot={false} name="Tendencia Negativas" />}
                   </LineChart>
                 )}
               </ResponsiveContainer>
@@ -1801,7 +1825,7 @@ export default function Home() {
           <section className="grid gap-4 lg:grid-cols-2">
             <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                <CheckCircle2 className={`h-5 w-5 ${pinkMode ? "text-purple-500" : "text-emerald-500"}`} />
                 Top 5 estudiantes con más positivas
               </h2>
               <div className="overflow-x-auto">
@@ -1828,7 +1852,7 @@ export default function Home() {
                           </td>
                           <td className="px-4 py-3.5 font-medium text-slate-800">{pos ? pos.estudiante : <span className="text-slate-400 font-normal">-</span>}</td>
                           <td className="px-4 py-3.5 text-center">
-                            {pos ? <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">{pos.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
+                            {pos ? <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${pinkMode ? "bg-purple-100 text-purple-700" : "bg-emerald-100 text-emerald-700"}`}>{pos.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
                           </td>
                         </tr>
                       );
@@ -1840,7 +1864,7 @@ export default function Home() {
 
             <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-                <AlertCircle className="h-5 w-5 text-rose-500" />
+                <AlertCircle className={`h-5 w-5 ${pinkMode ? "text-pink-500" : "text-rose-500"}`} />
                 Top 5 estudiantes con más negativas
               </h2>
               <div className="overflow-x-auto">
@@ -1867,7 +1891,7 @@ export default function Home() {
                           </td>
                           <td className="px-4 py-3.5 font-medium text-slate-800">{neg ? neg.estudiante : <span className="text-slate-400 font-normal">-</span>}</td>
                           <td className="px-4 py-3.5 text-center">
-                            {neg ? <span className="inline-block rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">{neg.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
+                            {neg ? <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${pinkMode ? "bg-pink-100 text-pink-700" : "bg-rose-100 text-rose-700"}`}>{neg.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
                           </td>
                         </tr>
                       );
@@ -1881,7 +1905,7 @@ export default function Home() {
           <section className="grid gap-4 lg:grid-cols-2">
             <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+                <CheckCircle2 className={`h-5 w-5 ${pinkMode ? "text-purple-500" : "text-emerald-500"}`} />
                 Top 5 funcionarios con más positivas
               </h2>
               <div className="overflow-x-auto">
@@ -1908,7 +1932,7 @@ export default function Home() {
                           </td>
                           <td className="px-4 py-3.5 font-medium text-slate-800">{pos ? pos.funcionario : <span className="text-slate-400 font-normal">-</span>}</td>
                           <td className="px-4 py-3.5 text-center">
-                            {pos ? <span className="inline-block rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">{pos.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
+                            {pos ? <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${pinkMode ? "bg-purple-100 text-purple-700" : "bg-emerald-100 text-emerald-700"}`}>{pos.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
                           </td>
                         </tr>
                       );
@@ -1920,7 +1944,7 @@ export default function Home() {
 
             <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-                <AlertCircle className="h-5 w-5 text-rose-500" />
+                <AlertCircle className={`h-5 w-5 ${pinkMode ? "text-pink-500" : "text-rose-500"}`} />
                 Top 5 funcionarios con más negativas
               </h2>
               <div className="overflow-x-auto">
@@ -1947,7 +1971,7 @@ export default function Home() {
                           </td>
                           <td className="px-4 py-3.5 font-medium text-slate-800">{neg ? neg.funcionario : <span className="text-slate-400 font-normal">-</span>}</td>
                           <td className="px-4 py-3.5 text-center">
-                            {neg ? <span className="inline-block rounded-full bg-rose-100 px-3 py-1 text-xs font-bold text-rose-700">{neg.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
+                            {neg ? <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${pinkMode ? "bg-pink-100 text-pink-700" : "bg-rose-100 text-rose-700"}`}>{neg.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
                           </td>
                         </tr>
                       );
@@ -1961,7 +1985,7 @@ export default function Home() {
           <section className="grid gap-4 print:hidden">
             <article className="relative rounded-2xl border border-slate-200 bg-white p-5 shadow-sm overflow-hidden">
               <h2 className="mb-4 text-lg font-semibold text-slate-800 flex items-center gap-2">
-                <AlertCircle className="h-5 w-5 text-rose-500" />
+                <AlertCircle className={`h-5 w-5 ${pinkMode ? "text-pink-500" : "text-indigo-500"}`} />
                 Detalle de faltas registradas
               </h2>
               {faltasStats.totalValidos > 0 ? (
@@ -1991,7 +2015,7 @@ export default function Home() {
                         />
                         <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: "#64748b" }} width={32} />
                         <Tooltip cursor={{ fill: "#f1f5f9" }} />
-                        <Bar dataKey="value" name="Cantidad" fill="#6366f1" radius={[6, 6, 0, 0]} maxBarSize={56} />
+                        <Bar dataKey="value" name="Cantidad" fill={pinkMode ? "#a855f7" : "#6366f1"} radius={[6, 6, 0, 0]} maxBarSize={56} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -2112,7 +2136,7 @@ export default function Home() {
                             else if (raw.includes("entrevista") && raw.includes("apoderado")) { category = "Entrevistas con apoderado"; label = "Entrevista con apoderado"; }
                             else if (raw.includes("entrevista")) { category = "Entrevistas con estudiante"; label = "Entrevista con estudiante"; }
                           }
-                          const color = PIE_COLORS[category] ?? "#94a3b8";
+                          const color = activePieColors[category] ?? "#94a3b8";
                           return (
                             <span
                               className="inline-block rounded-full px-2.5 py-1 text-xs font-semibold text-white"
