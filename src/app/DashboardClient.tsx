@@ -11,6 +11,10 @@ import {
   Info,
   BookOpen,
   LogOut,
+  Eye,
+  EyeOff,
+  Printer,
+  Flower,
 } from "lucide-react";
 import {
   Bar,
@@ -120,6 +124,7 @@ export default function DashboardClient() {
   const [selectedFechaObs, setSelectedFechaObs] = useState<string>("all");
   const [isLoading, setIsLoading] = useState(false);
   const [pinkMode, setPinkMode] = useState(false);
+  const [blurNames, setBlurNames] = useState(false);
   const [uploadedFilesCount, setUploadedFilesCount] = useState<number>(0);
   const [activeCourseTab, setActiveCourseTab] = useState<string>("all");
 
@@ -1065,12 +1070,26 @@ export default function DashboardClient() {
                   : "Visualiza y analiza el rendimiento general, promedios, aprobaciones y calificaciones por asignatura. Todo de forma local."}
               </p>
             </div>
-            <button
-              onClick={resetAll}
-              className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
-            >
-              Subir otro archivo
-            </button>
+            <div className="flex items-center gap-3 print:hidden">
+              <button
+                onClick={resetAll}
+                className="flex items-center justify-center gap-2 h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 transition active:scale-95 shadow-sm whitespace-nowrap"
+              >
+                <Upload className="h-4 w-4" />
+                <span>Subir otro archivo</span>
+              </button>
+              <button
+                onClick={() => setBlurNames(b => !b)}
+                title={blurNames ? "Mostrar nombres" : "Difuminar nombres"}
+                className={`flex items-center justify-center h-10 w-10 rounded-xl transition active:scale-95 shadow-sm border ${
+                  blurNames
+                    ? "bg-indigo-100 text-indigo-700 border-indigo-300 hover:bg-indigo-200"
+                    : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                }`}
+              >
+                {blurNames ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </header>
 
           {appMode === "panorama_riesgo" && (
@@ -1297,7 +1316,7 @@ export default function DashboardClient() {
                           return (
                             <tr key={student.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
                               <td className="px-3 py-3.5 text-center text-slate-500 whitespace-nowrap font-medium">{student.lista}</td>
-                              <td className="px-4 py-3.5 font-bold text-slate-800 whitespace-nowrap">{student.estudiante}</td>
+                              <td className={`px-4 py-3.5 font-bold text-slate-800 whitespace-nowrap transition-all duration-300 ${blurNames ? "blur-[6px] select-none" : ""}`}>{student.estudiante}</td>
 
                               {selectedCalificacionesAsignatura !== "all" ? (
                                 appMode === "panorama_riesgo" ? (
@@ -1585,7 +1604,7 @@ export default function DashboardClient() {
                               }
 
                               const isName = vh.display.toLowerCase() === "estudiante" || header.toLowerCase().includes("estudiante") || header.toLowerCase().includes("alumno") || header.toLowerCase().includes("nombre");
-                              if (isName) cellClass = "text-slate-900 font-bold";
+                              if (isName) cellClass = `text-slate-900 font-bold transition-all duration-300 ${blurNames ? "blur-[6px] select-none" : ""}`;
 
                               return (
                                 <td key={hIdx} className={`px-4 py-3.5 whitespace-nowrap ${cellClass}`}>
@@ -1640,26 +1659,39 @@ export default function DashboardClient() {
             <div className="flex items-center gap-3 print:hidden">
               <button
                 onClick={resetAll}
-                className="rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
+                className="flex items-center justify-center gap-2 h-10 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 transition active:scale-95 shadow-sm whitespace-nowrap"
               >
-                Subir otro archivo
+                <Upload className="h-4 w-4" />
+                <span>Subir otro archivo</span>
               </button>
               <button
                 onClick={() => window.print()}
-                className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition active:scale-95 shadow-sm whitespace-nowrap"
+                className="flex items-center justify-center gap-2 h-10 rounded-xl border border-slate-300 bg-slate-50 px-4 text-sm font-semibold text-slate-700 hover:bg-slate-100 transition active:scale-95 shadow-sm whitespace-nowrap"
               >
-                Generar PDF
+                <Printer className="h-4 w-4" />
+                <span>Generar PDF</span>
               </button>
               <button
                 onClick={() => setPinkMode(p => !p)}
                 title={pinkMode ? "Desactivar modo rosa" : "Activar modo rosa"}
-                className={`rounded-xl px-3 py-2.5 text-sm transition active:scale-95 shadow-sm border ${
+                className={`flex items-center justify-center h-10 w-10 rounded-xl transition active:scale-95 shadow-sm border ${
                   pinkMode
                     ? "bg-pink-100 text-pink-700 border-pink-300 hover:bg-pink-200"
                     : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
                 }`}
               >
-                🌸
+                <Flower className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setBlurNames(b => !b)}
+                title={blurNames ? "Mostrar nombres" : "Difuminar nombres"}
+                className={`flex items-center justify-center h-10 w-10 rounded-xl transition active:scale-95 shadow-sm border ${
+                  blurNames
+                    ? "bg-indigo-100 text-indigo-700 border-indigo-300 hover:bg-indigo-200"
+                    : "bg-slate-50 text-slate-400 border-slate-200 hover:bg-slate-100"
+                }`}
+              >
+                {blurNames ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
           </header>
@@ -1746,7 +1778,7 @@ export default function DashboardClient() {
                 </div>
                 {latestPositive ? (
                   <div>
-                    <h3 className="text-lg font-semibold text-slate-800">{latestPositive.nombreCompleto}</h3>
+                    <h3 className={`text-lg font-semibold text-slate-800 transition-all duration-300 ${blurNames ? "blur-[6px] select-none" : ""}`}>{latestPositive.nombreCompleto}</h3>
                     <p className="text-sm text-slate-600 italic line-clamp-3">&quot;{latestPositive.descripcion}&quot;</p>
                   </div>
                 ) : (
@@ -1763,7 +1795,7 @@ export default function DashboardClient() {
                 </div>
                 {latestNegative ? (
                   <div>
-                    <h3 className="text-lg font-semibold text-slate-800">{latestNegative.nombreCompleto}</h3>
+                    <h3 className={`text-lg font-semibold text-slate-800 transition-all duration-300 ${blurNames ? "blur-[6px] select-none" : ""}`}>{latestNegative.nombreCompleto}</h3>
                     <p className="text-sm text-slate-600 italic line-clamp-3">&quot;{latestNegative.descripcion}&quot;</p>
                   </div>
                 ) : (
@@ -1897,7 +1929,7 @@ export default function DashboardClient() {
                           <td className="px-4 py-3.5 text-center">
                             <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>{rank}</span>
                           </td>
-                          <td className="px-4 py-3.5 font-medium text-slate-800">{pos ? pos.estudiante : <span className="text-slate-400 font-normal">-</span>}</td>
+                          <td className={`px-4 py-3.5 font-medium text-slate-800 transition-all duration-300 ${blurNames ? "blur-[6px] select-none" : ""}`}>{pos ? pos.estudiante : <span className="text-slate-400 font-normal">-</span>}</td>
                           <td className="px-4 py-3.5 text-center">
                             {pos ? <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${pinkMode ? "bg-purple-100 text-purple-700" : "bg-emerald-100 text-emerald-700"}`}>{pos.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
                           </td>
@@ -1936,7 +1968,7 @@ export default function DashboardClient() {
                           <td className="px-4 py-3.5 text-center">
                             <span className={`inline-flex items-center justify-center h-6 w-6 rounded-full text-xs ${rankClass}`}>{rank}</span>
                           </td>
-                          <td className="px-4 py-3.5 font-medium text-slate-800">{neg ? neg.estudiante : <span className="text-slate-400 font-normal">-</span>}</td>
+                          <td className={`px-4 py-3.5 font-medium text-slate-800 transition-all duration-300 ${blurNames ? "blur-[6px] select-none" : ""}`}>{neg ? neg.estudiante : <span className="text-slate-400 font-normal">-</span>}</td>
                           <td className="px-4 py-3.5 text-center">
                             {neg ? <span className={`inline-block rounded-full px-3 py-1 text-xs font-bold ${pinkMode ? "bg-pink-100 text-pink-700" : "bg-rose-100 text-rose-700"}`}>{neg.totalObservaciones}</span> : <span className="text-slate-400">-</span>}
                           </td>
@@ -2169,7 +2201,7 @@ export default function DashboardClient() {
                   {filteredRows.map((row) => (
                     <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/50 transition">
                       <td className="px-4 py-3 text-slate-600 whitespace-nowrap">{row.fechaTexto || "-"}</td>
-                      <td className="px-4 py-3 font-medium whitespace-nowrap">{row.nombreCompleto}</td>
+                      <td className={`px-4 py-3 font-medium whitespace-nowrap transition-all duration-300 ${blurNames ? "blur-[6px] select-none" : ""}`}>{row.nombreCompleto}</td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         {(() => {
                           let category = "Observaciones";
@@ -2241,7 +2273,7 @@ export default function DashboardClient() {
             <p className="font-bold text-[9px] text-slate-700 uppercase mb-0.5">Última Anotación Positiva</p>
             {latestPositive ? (
               <div>
-                <p className="font-bold text-[10px] text-slate-900">{latestPositive.nombreCompleto}</p>
+                <p className={`font-bold text-[10px] text-slate-900 transition-all duration-300 ${blurNames ? "blur-[6px] select-none" : ""}`}>{latestPositive.nombreCompleto}</p>
                 <p className="text-[8px] text-slate-500 mb-0.5">{latestPositive.fechaTexto}</p>
                 <p className="text-[9px] text-slate-700 italic">&quot;{latestPositive.descripcion}&quot;</p>
               </div>
@@ -2253,7 +2285,7 @@ export default function DashboardClient() {
             <p className="font-bold text-[9px] text-slate-700 uppercase mb-0.5">Última Anotación Negativa</p>
             {latestNegative ? (
               <div>
-                <p className="font-bold text-[10px] text-slate-900">{latestNegative.nombreCompleto}</p>
+                <p className={`font-bold text-[10px] text-slate-900 transition-all duration-300 ${blurNames ? "blur-[6px] select-none" : ""}`}>{latestNegative.nombreCompleto}</p>
                 <p className="text-[8px] text-slate-500 mb-0.5">{latestNegative.fechaTexto}</p>
                 <p className="text-[9px] text-slate-700 italic">&quot;{latestNegative.descripcion}&quot;</p>
               </div>
