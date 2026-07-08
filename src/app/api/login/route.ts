@@ -50,7 +50,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // IP detection logic
+    // IP detection logic has been disabled to prevent login issues.
+    /*
     const forwardedFor = request.headers.get("x-forwarded-for");
     const ip = forwardedFor ? forwardedFor.split(",")[0].trim() : "127.0.0.1";
 
@@ -73,7 +74,9 @@ export async function POST(request: Request) {
         { status: 403 }
       );
       */
+    /*
     }
+    */
 
     const sessionToken = signSession(user.username);
 
