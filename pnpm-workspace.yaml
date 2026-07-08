@@ -1,9 +1,12 @@
-# pnpm v11+ syntax
-allowBuilds:
-  sharp: true
-  unrs-resolver: true
+# Required by pnpm v9 when workspace file exists (Nixpacks/Coolify uses pnpm v9.x)
+packages: []
 
-# pnpm v9 syntax (used by Nixpacks/Coolify)
+# Allow build scripts for these native deps (pnpm v9 syntax)
 onlyBuiltDependencies:
   - sharp
   - unrs-resolver
+
+# pnpm v11+ syntax (local dev)
+allowBuilds:
+  sharp: true
+  unrs-resolver: true
