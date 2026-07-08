@@ -1,0 +1,9 @@
+# pnpm v11+ syntax
+allowBuilds:
+  sharp: true
+  unrs-resolver: true
+
+# pnpm v9 syntax (used by Nixpacks/Coolify)
+onlyBuiltDependencies:
+  - sharp
+  - unrs-resolver
