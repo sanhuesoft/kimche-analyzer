@@ -50,7 +50,14 @@ export function processSingleFile(file: File): Promise<ParseResult> {
               const fechaTexto = row["Fecha"]?.trim() ?? "";
               const fechaOrdenable = parseDateToSortable(fechaTexto);
 
+              const partsFunc = [
+                row["Nombre Docente"],
+                row["Primer Apellido Docente"],
+                row["Segundo Apellido Docente"]
+              ].map(x => x?.trim()).filter(Boolean);
+
               const rawFunc =
+                partsFunc.length > 0 ? partsFunc.join(" ") :
                 row["Nombre docente autor"]?.trim() ||
                 row["Nombre Funcionario"]?.trim() ||
                 row["Funcionario"]?.trim() ||
@@ -71,7 +78,7 @@ export function processSingleFile(file: File): Promise<ParseResult> {
               return {
                 id: `${file.name}-${fechaTexto}-${nombreCompleto}-${row["Tipo de observación"]?.trim() ?? ""}-${index}`,
                 curso: row["Curso"]?.trim() ?? "",
-                numeroLista: row["No. Lista"]?.trim() ?? "",
+                numeroLista: row["No. Lista"]?.trim() ?? row["N° Lista"]?.trim() ?? "",
                 nombreCompleto,
                 fechaTexto,
                 fechaOrdenable,
@@ -194,7 +201,14 @@ function parseObservationsXlsx(file: File, workbook: XLSX.WorkBook, firstSheetNa
       const fechaTexto = normalizedRow["Fecha"]?.trim() ?? "";
       const fechaOrdenable = parseDateToSortable(fechaTexto);
 
+      const partsFunc = [
+        normalizedRow["Nombre Docente"],
+        normalizedRow["Primer Apellido Docente"],
+        normalizedRow["Segundo Apellido Docente"]
+      ].map(x => x?.trim()).filter(Boolean);
+
       const rawFunc =
+        partsFunc.length > 0 ? partsFunc.join(" ") :
         normalizedRow["Nombre docente autor"]?.trim() ||
         normalizedRow["Nombre Funcionario"]?.trim() ||
         normalizedRow["Funcionario"]?.trim() ||
@@ -215,7 +229,7 @@ function parseObservationsXlsx(file: File, workbook: XLSX.WorkBook, firstSheetNa
       return {
         id: `${file.name}-${fechaTexto}-${nombreCompleto}-${normalizedRow["Tipo de observación"]?.trim() ?? ""}-${index}`,
         curso: normalizedRow["Curso"]?.trim() ?? "",
-        numeroLista: normalizedRow["No. Lista"]?.trim() ?? "",
+        numeroLista: normalizedRow["No. Lista"]?.trim() ?? normalizedRow["N° Lista"]?.trim() ?? "",
         nombreCompleto,
         fechaTexto,
         fechaOrdenable,

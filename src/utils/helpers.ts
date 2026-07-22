@@ -2,9 +2,7 @@ import type { ObservationKind } from "@/types";
 
 export const REQUIRED_HEADERS = [
   "Curso",
-  "No. Lista",
   "Primer Apellido Estudiante",
-  "Segundo Apellido Estudiante",
   "Nombre Estudiante",
   "Fecha",
   "Tipo de observación",
