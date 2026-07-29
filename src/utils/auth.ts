@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import fs from "fs";
 
 export interface User {
   username: string;
@@ -30,6 +31,21 @@ export function verifySession(sessionStr: string | undefined): string | null {
 }
 
 export function getUsers(): User[] {
+  const usersFilePath = process.env.USERS_FILE_PATH || "/etc/kimche/users.json";
+
+  // Check if mounted users file exists (remote deployment)
+  try {
+    if (fs.existsSync(usersFilePath)) {
+      const content = fs.readFileSync(usersFilePath, "utf-8").trim();
+      if (content) {
+        return JSON.parse(content);
+      }
+    }
+  } catch (e) {
+    console.error(`Error reading or parsing users file at ${usersFilePath}:`, e);
+  }
+
+  // Fallback to process.env.USERS_JSON (local development)
   try {
     let json = process.env.USERS_JSON || "[]";
     json = json.trim();
@@ -38,7 +54,8 @@ export function getUsers(): User[] {
     }
     return JSON.parse(json);
   } catch (e) {
-    console.error("Error parsing USERS_JSON", e);
+    console.error("Error parsing USERS_JSON env variable:", e);
     return [];
   }
 }
+
