@@ -2,6 +2,8 @@
 
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
   CheckCircle2,
   Filter,
   Search,
@@ -122,6 +124,7 @@ export default function DashboardClient() {
   const [selectedAsignaturaObs, setSelectedAsignaturaObs] = useState<string>("all");
   const [selectedCursoObs, setSelectedCursoObs] = useState<string>("all");
   const [selectedFechaObs, setSelectedFechaObs] = useState<string>("all");
+  const [obsDateSortOrder, setObsDateSortOrder] = useState<"asc" | "desc">("desc");
   const [isLoading, setIsLoading] = useState(false);
   const [pinkMode, setPinkMode] = useState(false);
   const [blurNames, setBlurNames] = useState(false);
@@ -542,7 +545,7 @@ export default function DashboardClient() {
 
   const filteredRows = useMemo(() => {
     const term = searchQuery.trim().toLowerCase();
-    return displayObservations.filter((item) => {
+    const result = displayObservations.filter((item) => {
       const matchesSearch = !term || item.nombreCompleto.toLowerCase().includes(term);
       let matchesType = true;
       if (quickFilter !== "all") {
@@ -562,7 +565,16 @@ export default function DashboardClient() {
       const matchesFecha = selectedFechaObs === "all" || item.fechaTexto === selectedFechaObs;
       return matchesSearch && matchesType && matchesAsignatura && matchesCurso && matchesFecha;
     });
-  }, [displayObservations, quickFilter, searchQuery, selectedAsignaturaObs, selectedCursoObs, selectedFechaObs]);
+
+    return [...result].sort((a, b) => {
+      const dateA = a.fechaOrdenable || parseDateToSortable(a.fechaTexto) || "";
+      const dateB = b.fechaOrdenable || parseDateToSortable(b.fechaTexto) || "";
+      if (obsDateSortOrder === "desc") {
+        return dateB.localeCompare(dateA);
+      }
+      return dateA.localeCompare(dateB);
+    });
+  }, [displayObservations, quickFilter, searchQuery, selectedAsignaturaObs, selectedCursoObs, selectedFechaObs, obsDateSortOrder]);
 
   const uniqueAsignaturas = useMemo(() => {
     return Array.from(new Set(pendientes.map((p) => p.asignatura).filter(Boolean))).sort();
@@ -2191,7 +2203,27 @@ export default function DashboardClient() {
               <table className="min-w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500 font-medium">
-                    <th className="px-4 py-3 min-w-[100px]">Fecha</th>
+                    <th className="px-4 py-3 min-w-[120px]">
+                      <button
+                        type="button"
+                        onClick={() => setObsDateSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))}
+                        className="group inline-flex items-center gap-1.5 font-medium hover:text-slate-800 transition-colors cursor-pointer select-none"
+                        title={
+                          obsDateSortOrder === "desc"
+                            ? "Orden actual: Más reciente a más antigua. Clic para invertir."
+                            : "Orden actual: Más antigua a más reciente. Clic para invertir."
+                        }
+                      >
+                        <span>Fecha</span>
+                        <span className="inline-flex items-center justify-center p-0.5 rounded bg-slate-100 group-hover:bg-indigo-100 group-hover:text-indigo-600 transition-colors">
+                          {obsDateSortOrder === "desc" ? (
+                            <ArrowDown className="w-3.5 h-3.5 text-indigo-600" />
+                          ) : (
+                            <ArrowUp className="w-3.5 h-3.5 text-indigo-600" />
+                          )}
+                        </span>
+                      </button>
+                    </th>
                     <th className="px-4 py-3 min-w-[200px]">Estudiante</th>
                     <th className="px-4 py-3 min-w-[140px] whitespace-nowrap">Tipo</th>
                     <th className="px-4 py-3">Descripción</th>
